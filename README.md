@@ -22,7 +22,7 @@ Reproductor de audio inteligente y minimalista para **Linux** y **Android (Termu
 
 ```bash
 # Clonar repositorio
-git clone https://github.com/TU_USUARIO/omniplayer.git
+git clone https://github.com/Usuariojhp/omniplayer.git
 cd omniplayer
 
 # Dependencias del sistema

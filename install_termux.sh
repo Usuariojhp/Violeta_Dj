@@ -31,13 +31,13 @@ if [ -d "/sdcard/ai_dj" ]; then
 fi
 
 # Crear scripts ejecutables en $PREFIX/bin para que funcionen siempre sin reiniciar la terminal
-cat << 'EOF' > "$PREFIX/bin/dj"
+cat <<'EOF' >"$PREFIX/bin/dj"
 #!/data/data/com.termux/files/usr/bin/bash
 python "$HOME/ai_dj/ai_dj.py" "$@"
 EOF
 chmod +x "$PREFIX/bin/dj"
 
-cat << 'EOF' > "$PREFIX/bin/dj-web"
+cat <<'EOF' >"$PREFIX/bin/dj-web"
 #!/data/data/com.termux/files/usr/bin/bash
 python "$HOME/ai_dj/web_dj.py" "$@"
 EOF

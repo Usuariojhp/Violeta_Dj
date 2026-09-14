@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 web_dj.py - Reproductor Web con Crossfade Real para Móvil y PC.
-Diseño minimalista, profesional y elegante sin emojis, con iconos SVG de alta definición.
+Diseño minimalista con iconos SVG de alta definición.
 Detecta canciones de todo el dispositivo, permite seleccionar carpetas o canciones individuales,
 modo aleatorio (shuffle), y mezcla continua con doble deck.
 """

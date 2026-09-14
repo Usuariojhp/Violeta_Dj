@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-ai_dj.py - Reproductor Terminal Minimalista con Doble Deck y Crossfade Continuo.
-Diseño limpio y profesional sin emojis.
-"""
+""" ai_dj.py - Reproductor Terminal Minimalista con Doble Deck y Crossfade Continuo. """
 import os
 import sys
 import time
