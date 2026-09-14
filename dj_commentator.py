@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dj_commentator.py - Generador de guiones y voz de DJ Livi.
+dj_commentator.py - Generador de guiones y voz de locucion.
 Soporta modo online (Edge-TTS) y modo 100% offline (Piper TTS local ultraligero).
 """
 import os
@@ -20,10 +20,9 @@ class DJCommentator:
         self.cache_dir = cache_dir or os.path.join(tempfile.gettempdir(), "dj_livi_audio")
         self.force_offline = force_offline
         os.makedirs(self.cache_dir, exist_ok=True)
-        self.user_name = "José"
+        self.user_name = "Jose"
         self.piper_voice = None
 
-        # Preparar motor Piper si existe el modelo
         if os.path.exists(PIPER_MODEL) and os.path.exists(PIPER_CONFIG):
             try:
                 from piper import PiperVoice
@@ -36,49 +35,47 @@ class DJCommentator:
         title = track.get('title')
         if artist and title:
             return f"{title} de {artist}"
-        return title or track.get('filename', 'este temazo')
+        return title or track.get('filename', 'esta pista')
 
     def generate_welcome_script(self, context_name, first_track):
         track_str = self.format_track_name(first_track)
         greetings = [
-            f"¡Hola {self.user_name}! Qué bueno tenerte aquí. Soy Livi, tu DJ personal. Hoy la música corre por mi cuenta. Empezamos con {track_str}.",
-            f"¡Ey qué tal, {self.user_name}! Aquí Livi en los controles. Reproduciendo desde {context_name}. Arrancamos con {track_str}.",
-            f"¡Hola {self.user_name}! Todo listo en la cabina. Sube el volumen que hoy suena {track_str}."
+            f"Hola {self.user_name}. Todo listo en el reproductor. Iniciamos con {track_str}.",
+            f"Saludos {self.user_name}. Reproduciendo tu musica desde {context_name}. A continuacion, {track_str}.",
+            f"Sesion iniciada. Disfruta la mezcla continua con {track_str}."
         ]
         return random.choice(greetings)
 
     def generate_folder_switch_script(self, folder_name, next_track):
         track_str = self.format_track_name(next_track)
         lines = [
-            f"Cambiamos a la carpeta {folder_name}. Arrancamos con {track_str}.",
-            f"Nos movemos directo a tu música en {folder_name}. Suena {track_str}.",
-            f"Explorando {folder_name}. Aquí viene {track_str}."
+            f"Cambiando a la carpeta {folder_name}. Iniciamos con {track_str}.",
+            f"Reproduciendo desde {folder_name}. Suena {track_str}.",
+            f"Seleccion de {folder_name}. En cabina, {track_str}."
         ]
         return random.choice(lines)
 
     def generate_shuffle_intro(self, next_track):
         track_str = self.format_track_name(next_track)
         lines = [
-            f"Modo aleatorio activado. Sacando temazos de toda tu biblioteca. Suena {track_str}.",
-            f"En aleatorio total. Lo que venga suena increíble, arrancamos con {track_str}.",
-            f"Mezclando todo tu dispositivo sin filtro. Escucha {track_str}."
+            f"Modo aleatorio activado. Sonando {track_str}.",
+            f"Mezcla aleatoria iniciada. Escuchas {track_str}.",
+            f"Reproduccion aleatoria. En cabina, {track_str}."
         ]
         return random.choice(lines)
 
     def generate_track_intro_script(self, track):
         track_str = self.format_track_name(track)
         intros = [
-            f"Y a continuación en cabina, escucha {track_str}.",
-            f"Seguimos sin pausas con este temazo: {track_str}.",
-            f"No le bajes, que ahora suena {track_str}.",
-            f"Directo en la mezcla: {track_str}."
+            f"A continuacion, {track_str}.",
+            f"Seguimos sin cortes con {track_str}.",
+            f"Directo en la mezcla, {track_str}."
         ]
         return random.choice(intros)
 
     def synthesize_offline_piper(self, text, output_wav_path):
-        """Genera voz 100% offline en CPU usando Piper."""
         if not self.piper_voice:
-            raise RuntimeError("Piper local no está inicializado.")
+            raise RuntimeError("Piper local no esta inicializado.")
         with wave.open(output_wav_path, "wb") as wav_file:
             self.piper_voice.synthesize_wav(text, wav_file)
         return output_wav_path

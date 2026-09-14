@@ -1,29 +1,29 @@
-# 🎧 OmniPlayer DJ - Reproductor con Crossfade Continuo & DJ IA
+# OmniPlayer - Crossfade Studio
 
-Reproductor de música inteligente y minimalista para **Linux** y **Android (Termux)** con doble deck virtual, crossfade automático continuo en tiempo real, detección automática de todas las canciones del dispositivo, selección por carpetas o pistas individuales, y soporte para locución con voz de IA.
-
----
-
-## ✨ Características
-
-* **🎵 Detección automática en todo el dispositivo:** Escanea tu almacenamiento interno (`/sdcard`, `~/Música`, `~/Descargas`, etc.) sin importar dónde guardes tus canciones.
-* **🎚️ Crossfade continuo real:** Doble consola MPV (`Deck A` y `Deck B`) para fundir el final de una canción con el inicio de la siguiente sin silencios ni cortes bruscos.
-* **📁 Selección por Carpetas o Canción Individual:** Elige escuchar una carpeta específica (ej. álbum o playlist) o salta a cualquier canción suelta.
-* **🔀 Modo Aleatorio (Shuffle) inteligente:** Mezcla todo el dispositivo o la carpeta seleccionada manteniendo el crossfade activo.
-* **📱 Interfaz Web Táctil Móvil:** Sin necesidad de frameworks pesados, incluye una interfaz web moderna y oscura (`http://localhost:5000`) ideal para usar con una mano en el navegador de tu celular.
-* **💻 Interfaz de Terminal (CLI):** Pantalla interactiva en consola para computadoras o terminal Termux.
-* **🎙️ DJ Virtual con Locución:** Comentarios dinámicos al iniciar o cambiar de carpeta usando voces neuronales (`Edge-TTS` online o `Piper` 100% offline).
+Reproductor de audio inteligente y minimalista para **Linux** y **Android (Termux)** con arquitectura de doble consola virtual MPV, crossfade continuo automatico en tiempo real, deteccion de todas las pistas del almacenamiento, navegacion por carpetas o pistas individuales, y soporte para locucion por voz sintetizada.
 
 ---
 
-## 🚀 Instalación y Uso
+## Caracteristicas
+
+* **Deteccion total en el almacenamiento:** Escaneo recursivo de directorios (`/sdcard`, `~/Musica`, `~/Descargas`, etc.) omitiendo rutas de sistema o temporales.
+* **Crossfade continuo real:** Doble consola MPV (`Deck A` y `Deck B`) para transiciones fluidas de volumen sin silencios entre canciones.
+* **Navegacion por Carpetas o Cancion:** Reproduccion de albumes/carpetas completas o seleccion de canciones individuales.
+* **Modo Aleatorio (Shuffle):** Mezcla equilibrada de toda la coleccion o de la carpeta activa manteniendo el crossfade.
+* **Interfaz Web Tactil:** Diseno de estudio minimalista y oscuro sin dependencias externas pesadas (`http://localhost:5000`), optimizado para navegadores moviles y de escritorio.
+* **Interfaz de Consola (CLI):** Vista rapida e interactiva en terminal.
+* **Locucion Inteligente:** Intervenciones breves mediante sintesis de voz neuronal (`Edge-TTS` online o `Piper` local offline).
+
+---
+
+## Instalacion y Uso
 
 ### En Linux (PC)
 
 ```bash
 # Clonar repositorio
-git clone https://github.com/TU_USUARIO/omniplayer-dj.git
-cd omniplayer-dj
+git clone https://github.com/TU_USUARIO/omniplayer.git
+cd omniplayer
 
 # Dependencias del sistema
 sudo dnf install mpv ffmpeg   # En Fedora / RHEL
@@ -32,14 +32,14 @@ sudo dnf install mpv ffmpeg   # En Fedora / RHEL
 # Dependencias Python
 pip install edge-tts
 
-# Iniciar la Interfaz Web Táctil (Recomendada):
+# Iniciar la interfaz Web (Recomendado):
 python3 web_dj.py
 
-# O iniciar en Modo Terminal:
+# O iniciar en terminal:
 python3 ai_dj.py
 ```
 
-Luego abre tu navegador en `http://localhost:5000`.
+Abre tu navegador en `http://localhost:5000`.
 
 ---
 
@@ -49,28 +49,28 @@ Luego abre tu navegador en `http://localhost:5000`.
 ```bash
 bash /sdcard/ai_dj/install_termux.sh
 ```
-2. Para usarlo:
-   * Escribe `dj-web` y abre `http://localhost:5000` en Chrome o tu navegador.
-   * O escribe `dj` para usarlo directamente en la pantalla de Termux.
+2. Para ejecutar:
+   * Escribe `dj-web` y abre `http://localhost:5000` en tu navegador movil.
+   * O escribe `dj` para usarlo directamente en la terminal.
 
 ---
 
-## 🎮 Controles en Modo Terminal
+## Controles en Modo Terminal
 
-| Tecla | Acción |
+| Tecla | Accion |
 | :---: | :--- |
 | `[ESPACIO]` | Pausar / Reanudar |
-| `[N]` / `[▲]` | Siguiente canción (Crossfade continuo) |
-| `[B]` / `[R]` / `[▼]` | Canción anterior / Reiniciar pista |
-| `[.]` / `[►]` | Adelantar 10 segundos |
-| `[,]` / `[◄]` | Retroceder 10 segundos |
-| `[S]` | Activar / Desactivar Modo Aleatorio (Shuffle) |
+| `[N]` / `[Flecha Arriba]` | Siguiente pista (Crossfade) |
+| `[B]` / `[R]` / `[Flecha Abajo]` | Pista anterior / Reiniciar |
+| `[.]` / `[Flecha Derecha]` | Adelantar 10 segundos |
+| `[,]` / `[Flecha Izquierda]` | Retroceder 10 segundos |
+| `[S]` | Activar / Desactivar Shuffle |
 | `[T]` | Reproducir todo el dispositivo |
 | `[1]` a `[8]` | Reproducir carpeta seleccionada |
 | `[Q]` | Salir |
 
 ---
 
-## 📄 Licencia
+## Licencia
 
 MIT License.

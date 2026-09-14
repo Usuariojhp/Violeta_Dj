@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ai_dj.py - Reproductor Terminal con Doble Deck, Crossfade Continuo, Modo Carpetas y Canciones.
-Detecta todas las canciones del dispositivo, soporte para shuffle y crossfade automático.
+ai_dj.py - Reproductor Terminal Minimalista con Doble Deck y Crossfade Continuo.
+Diseño limpio y profesional sin emojis.
 """
 import os
 import sys
@@ -41,16 +41,16 @@ class DJLiviApp:
         self.running = True
 
     def setup(self):
-        print(f"{C_CYAN}{C_BOLD}🎵 Escaneando todo el dispositivo en busca de música...{C_RESET}")
+        print(f"{C_CYAN}Escaneando dispositivo en busca de musica...{C_RESET}")
         self.all_tracks, self.folder_map = scan_all_device()
         total = len(self.all_tracks)
         if total == 0:
             print(f"{C_RED}No se encontraron canciones en el dispositivo.{C_RESET}")
             sys.exit(1)
 
-        print(f"{C_GREEN}✔ ¡{total} canciones detectadas en {len(self.folder_map)} carpetas!{C_RESET}")
+        print(f"{C_GREEN}[OK] {total} canciones detectadas en {len(self.folder_map)} carpetas.{C_RESET}")
         for folder, tracks in list(self.folder_map.items())[:5]:
-            print(f"  • {folder}: {len(tracks)} canciones")
+            print(f"  * {folder}: {len(tracks)} pistas")
 
         self.mixer.start()
         self.current_queue = list(self.all_tracks)
@@ -64,7 +64,7 @@ class DJLiviApp:
         if trigger_speech:
             script = self.commentator.generate_welcome_script(self.context_name, track)
             def speak():
-                self.status_msg = f"🎙️ Livi: \"{script[:50]}...\""
+                self.status_msg = f"[Livi] {script[:50]}..."
                 try:
                     speech = self.commentator.prepare_speech(script, "livi_intro.mp3")
                     self.mixer.play_track(track)
@@ -72,11 +72,11 @@ class DJLiviApp:
                     self.mixer.play_voice_with_ducking(speech)
                 except Exception:
                     self.mixer.play_track(track)
-                self.status_msg = "🎵 Reproduciendo"
+                self.status_msg = "Reproduciendo"
             threading.Thread(target=speak, daemon=True).start()
         else:
             self.mixer.play_track(track, crossfade_sec=3.5)
-            self.status_msg = "🎵 Reproduciendo"
+            self.status_msg = "Reproduciendo"
 
     def advance_track(self):
         if not self.current_queue:
@@ -92,14 +92,14 @@ class DJLiviApp:
 
         next_track = self.current_queue[self.queue_index]
         self.mixer.play_track(next_track, crossfade_sec=4.5)
-        self.status_msg = f"🎵 {next_track.get('title') or next_track.get('filename')}"
+        self.status_msg = f"{next_track.get('title') or next_track.get('filename')}"
 
     def previous_track(self):
         status = self.mixer.get_status()
         pos = status.get('pos', 0.0)
         if pos > 3.0:
             self.mixer.seek(-99999)
-            self.status_msg = "⏮️ Reiniciando pista actual"
+            self.status_msg = "Reiniciando pista actual"
             return
 
         if self.queue_index > 0:
@@ -112,7 +112,7 @@ class DJLiviApp:
             return
 
         self.mixer.play_track(prev_track, crossfade_sec=3.0)
-        self.status_msg = f"⏮️ {prev_track.get('title') or prev_track.get('filename')}"
+        self.status_msg = f"{prev_track.get('title') or prev_track.get('filename')}"
 
     def toggle_shuffle(self):
         self.shuffle_mode = not self.shuffle_mode
@@ -122,7 +122,7 @@ class DJLiviApp:
             random.shuffle(rest)
             self.current_queue = ([curr] if curr else []) + rest
             self.queue_index = 0
-        self.status_msg = f"🔀 Aleatorio {'ACTIVADO' if self.shuffle_mode else 'DESACTIVADO'}"
+        self.status_msg = f"Aleatorio: {'ON' if self.shuffle_mode else 'OFF'}"
 
     def play_folder_by_index(self, idx):
         folders = list(self.folder_map.keys())
@@ -135,12 +135,12 @@ class DJLiviApp:
             self.queue_index = 0
             self.context_name = f"Carpeta: {f_name}"
             self.mixer.play_track(self.current_queue[0], crossfade_sec=3.5)
-            self.status_msg = f"📁 Reproduciendo carpeta: {f_name}"
+            self.status_msg = f"Carpeta: {f_name}"
 
     def seek_seconds(self, seconds):
         self.mixer.seek(seconds)
         sign = "+" if seconds > 0 else ""
-        self.status_msg = f"⏩ {sign}{seconds}s" if seconds > 0 else f"⏪ {seconds}s"
+        self.status_msg = f"Posicion {sign}{seconds}s" if seconds > 0 else f"Posicion {seconds}s"
 
     def format_time(self, seconds):
         mins = int(seconds // 60)
@@ -156,56 +156,56 @@ class DJLiviApp:
         ducking = status.get('ducking', False)
 
         sys.stdout.write("\033[H\033[J")
-        mode_tag = f"{C_GREEN}[100% Offline]{C_RESET}" if self.force_offline else f"{C_CYAN}[Híbrido/Auto]{C_RESET}"
-        shuf_tag = f"{C_GREEN}[ALEATORIO ON]{C_RESET}" if self.shuffle_mode else f"{C_GRAY}[ALEATORIO OFF]{C_RESET}"
+        mode_tag = f"{C_GREEN}[OFFLINE]{C_RESET}" if self.force_offline else f"{C_CYAN}[ONLINE]{C_RESET}"
+        shuf_tag = f"{C_GREEN}[SHUFFLE ON]{C_RESET}" if self.shuffle_mode else f"{C_GRAY}[SHUFFLE OFF]{C_RESET}"
 
-        print(f"{C_MAGENTA}{C_BOLD}╔══════════════════════════════════════════════════════════════════════════╗{C_RESET}")
-        print(f"{C_MAGENTA}{C_BOLD}║                       🎧  O M N I P L A Y E R   D J                      ║{C_RESET}")
-        print(f"{C_MAGENTA}{C_BOLD}║              Reproductor con Crossfade Continuo y Mezcla Total           ║{C_RESET}")
-        print(f"{C_MAGENTA}{C_BOLD}╚══════════════════════════════════════════════════════════════════════════╝{C_RESET} {mode_tag} {shuf_tag}")
+        print(f"{C_BOLD}========================================================================{C_RESET}")
+        print(f"{C_BOLD}                     OMNIPLAYER  |  CROSSFADE STUDIO                    {C_RESET}")
+        print(f"                     Reproductor de Audio Continuo                      ")
+        print(f"{C_BOLD}========================================================================{C_RESET} {mode_tag} {shuf_tag}")
         print()
 
         if ducking:
-            print(f" {C_YELLOW}{C_BOLD}🎙️  LIVI:{C_RESET} {C_YELLOW}{self.status_msg}{C_RESET}")
+            print(f" {C_YELLOW}[VOZ]{C_RESET} {self.status_msg}")
         elif paused:
-            print(f" {C_RED}{C_BOLD}⏸️  EN PAUSA{C_RESET}")
+            print(f" {C_RED}[PAUSA]{C_RESET}")
         else:
-            print(f" {C_GREEN}{C_BOLD}▶  ESTADO:{C_RESET} {self.status_msg}")
+            print(f" {C_GREEN}[REPRODUCIENDO]{C_RESET} {self.status_msg}")
 
-        q_pos = f"{self.queue_index + 1} de {len(self.current_queue)}" if self.current_queue else "0/0"
-        print(f" {C_CYAN}Origen:{C_RESET} {C_BOLD}{self.context_name}{C_RESET} (Pista {q_pos} | Total: {len(self.all_tracks)})")
+        q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else "0/0"
+        print(f" Origen: {C_BOLD}{self.context_name}{C_RESET} (Pista {q_pos} | Total: {len(self.all_tracks)})")
         print()
 
         if track:
             title = track.get('title') or track.get('filename')
             artist = track.get('artist') or track.get('folder')
-            print(f" {C_BOLD}🎶 Pista:{C_RESET}   {C_CYAN}{title}{C_RESET}")
-            print(f" {C_BOLD}👤 Artista:{C_RESET} {artist} {C_GRAY}(📁 {track.get('folder')}){C_RESET}")
+            print(f" Pista:   {C_CYAN}{C_BOLD}{title}{C_RESET}")
+            print(f" Artista: {artist} {C_GRAY}(Carpeta: {track.get('folder')}){C_RESET}")
             
             pct = min(1.0, max(0.0, (pos / dur))) if dur > 0 else 0.0
-            bar_len = 35
+            bar_len = 38
             filled = int(bar_len * pct)
-            bar = f"{C_GREEN}{'━' * filled}{C_GRAY}{'━' * (bar_len - filled)}{C_RESET}"
+            bar = f"{C_GREEN}{'=' * filled}{C_GRAY}{'-' * (bar_len - filled)}{C_RESET}"
             time_str = f"{self.format_time(pos)} / {self.format_time(dur)}"
-            print(f"    [{bar}] {time_str}")
+            print(f" [{bar}] {time_str}")
         else:
             print(f" {C_GRAY}Sin pista activa...{C_RESET}")
 
         print()
-        print(f"{C_GRAY}──────────────────────────────────────────────────────────────────────────{C_RESET}")
+        print(f"{C_GRAY}------------------------------------------------------------------------{C_RESET}")
         print(f"{C_BOLD}Controles principales:{C_RESET}")
-        print(f"  [{C_CYAN}ESPACIO{C_RESET}] Pausa/Play      [{C_CYAN}B / R{C_RESET}] Canción anterior    [{C_CYAN}N{C_RESET}] Siguiente pista (Crossfade)")
-        print(f"  [{C_CYAN}, / ◄{C_RESET}] Retroceder 10s   [{C_CYAN}. / ►{C_RESET}] Adelantar 10s       [{C_CYAN}S{C_RESET}] Activar/Desactivar Aleatorio")
-        print(f"  [{C_CYAN}T{C_RESET}] Reproducir Todo el dispositivo          [{C_CYAN}Q{C_RESET}] Salir")
+        print(f"  [ESPACIO] Pausa/Play       [B / R] Pista anterior     [N] Siguiente pista")
+        print(f"  [, / <-] Retroceder 10s    [. / ->] Adelantar 10s     [S] Shuffle ON/OFF")
+        print(f"  [T] Todo el dispositivo    [Q] Salir")
         
         folders = list(self.folder_map.keys())
         if folders:
-            print(f"\n{C_BOLD}Carpetas disponibles (Presiona el número):{C_RESET}")
+            print(f"\n{C_BOLD}Carpetas disponibles (Presiona el numero):{C_RESET}")
             f_str = "  "
             for i, f in enumerate(folders[:8]):
-                f_str += f"[{C_YELLOW}{i+1}{C_RESET}] {f} ({len(self.folder_map[f])})   "
+                f_str += f"[{i+1}] {f} ({len(self.folder_map[f])})   "
             print(f_str)
-        print(f"{C_GRAY}──────────────────────────────────────────────────────────────────────────{C_RESET}")
+        print(f"{C_GRAY}------------------------------------------------------------------------{C_RESET}")
 
     def run(self):
         self.setup()
@@ -220,7 +220,7 @@ class DJLiviApp:
                 pos = status.get('pos', 0.0)
                 dur = status.get('dur', 0.0)
 
-                # Crossfade duro automático antes de terminar la canción
+                # Crossfade automatico antes del final
                 if status['playing'] and dur > 8 and (dur - pos) <= 4.5:
                     if not crossfade_triggered:
                         crossfade_triggered = True
