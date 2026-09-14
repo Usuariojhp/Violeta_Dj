@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+voices/
+*.onnx
+*.onnx.json
+/tmp/
+.vscode/
+.idea/
