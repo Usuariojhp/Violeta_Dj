@@ -17,6 +17,10 @@ from urllib.parse import urlparse, parse_qs
 from music_scanner import scan_all_device
 from dj_commentator import DJCommentator
 from dj_mixer import DJMixer
+from dj_brain import get_brain
+from track_intel import enrich_tracks
+from set_engine import build_set, next_mood, normalize_mood, DEFAULT_MOOD
+from voice_command import get_voice
 
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="es">
@@ -396,6 +400,77 @@ HTML_PAGE = """<!DOCTYPE html>
       margin-top: 14px;
       min-height: 16px;
     }
+
+    /* Panel Livi (chat + moods) */
+    .livi-panel {
+      margin-top: 18px;
+      padding: 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    .livi-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .livi-title button {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .mood-row { display: flex; gap: 6px; margin-bottom: 10px; }
+    .mood-row button {
+      flex: 1;
+      padding: 8px 0;
+      background: var(--surface-elevated);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .mood-row button:hover { color: var(--accent); border-color: var(--accent); }
+    #liviChat {
+      max-height: 130px;
+      overflow-y: auto;
+      font-size: 12px;
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .chat-msg { padding: 4px 8px; border-radius: 8px; margin-bottom: 4px; }
+    .chat-user { color: var(--text-muted); background: var(--bg); }
+    .chat-livi { color: var(--text-main); background: var(--accent-dim); }
+    .livi-input-row { display: flex; gap: 6px; }
+    #liviInput {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 12px;
+      color: var(--text-main);
+      font-size: 13px;
+    }
+    #liviInput:focus { outline: none; border-color: var(--border-focus); }
+    .livi-input-row button {
+      background: var(--accent);
+      color: #08130c;
+      border: none;
+      border-radius: 8px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -478,6 +553,24 @@ HTML_PAGE = """<!DOCTYPE html>
   <div class="catalog-list" id="itemsList"></div>
 
   <div class="status-note" id="statusNote">Crossfade continuo activo</div>
+
+  <div class="livi-panel">
+    <div class="livi-title">
+      <span>Livi DJ <span id="setInfo"></span></span>
+      <button onclick="liviListen()">Hablar</button>
+    </div>
+    <div class="mood-row">
+      <button onclick="liviMood('chill')">Chill</button>
+      <button onclick="liviMood('energico')">Energico</button>
+      <button onclick="liviMood('fiesta')">Fiesta</button>
+      <button onclick="liviMood('enfoque')">Enfoque</button>
+    </div>
+    <div id="liviChat"></div>
+    <div class="livi-input-row">
+      <input type="text" id="liviInput" placeholder="Pedile algo a Livi: 'pone musica para enfocar'">
+      <button onclick="askLivi()">Enviar</button>
+    </div>
+  </div>
 
   <script>
     let currentTab = 'folders';
@@ -622,16 +715,82 @@ HTML_PAGE = """<!DOCTYPE html>
 
     setInterval(updateStatus, 600);
     updateStatus();
+
+    function askLivi() {
+      const input = document.getElementById('liviInput');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      appendChat('user', text);
+      fetch('/api/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request: text })
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.reply) appendChat('livi', data.reply);
+          if (data && data.set_info) {
+            const s = data.set_info;
+            document.getElementById('setInfo').innerText =
+              'Set ' + (s.mood_label || s.mood) + ' · ' + s.track_count +
+              ' pistas · ' + s.minutes + ' min';
+          }
+          updateStatus();
+        })
+        .catch(() => appendChat('livi', 'No pude procesar el pedido.'));
+    }
+
+    function liviMood(mood) {
+      fetch('/api/mood', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mood: mood })
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.reply) appendChat('livi', data.reply);
+        });
+    }
+
+    function liviListen() {
+      fetch('/api/voice_listen', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.heard) appendChat('user', '(voz) ' + data.heard);
+          if (data.reply) appendChat('livi', data.reply);
+          if (data.error || data.reason) {
+            appendChat('livi', 'Voz no disponible: ' +
+              (data.reason || data.error));
+          }
+        });
+    }
+
+    function appendChat(who, text) {
+      const box = document.getElementById('liviChat');
+      const div = document.createElement('div');
+      div.className = 'chat-msg chat-' + who;
+      div.innerText = (who === 'user' ? 'Vos: ' : 'Livi: ') + text;
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    document.getElementById('liviInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') askLivi();
+    });
   </script>
 </body>
 </html>
 """
 
 class DJLiviController:
-    def __init__(self, force_offline=False):
+    def __init__(self, force_offline=False, enrich_audio=False):
         self.force_offline = force_offline
+        self.enrich_audio = enrich_audio
         self.mixer = DJMixer()
         self.commentator = DJCommentator(force_offline=force_offline)
+        self.brain = get_brain()
+        self.voice = get_voice()
         self.all_tracks = []
         self.folder_map = {}
         
@@ -641,12 +800,23 @@ class DJLiviController:
         self.shuffle_mode = False
         self.context_name = "Todo el dispositivo"
         self.status_msg = "Escaneando dispositivo..."
+        self.mood = None
+        self.auto_dj = True
+        self.set_info = None
+        self.chat_log = []
         self.lock = threading.Lock()
         
         self.setup()
 
     def setup(self):
         self.all_tracks, self.folder_map = scan_all_device()
+        if self.all_tracks:
+            try:
+                self.all_tracks, report = enrich_tracks(
+                    self.all_tracks, use_audio=self.enrich_audio)
+                self.status_msg = ("Analizadas %d pistas" % report["enriched"])
+            except Exception as exc:
+                print("[intel] no se pudo enriquecer: %s" % exc)
         self.mixer.start()
         
         if self.all_tracks:
@@ -758,6 +928,21 @@ class DJLiviController:
 
             self.queue_index += 1
             if self.queue_index >= len(self.current_queue):
+                if self.auto_dj and self.mood:
+                    # Auto-DJ: rearma el set cuando se acaba la cola
+                    self.lock.release()
+                    try:
+                        self.build_auto_queue(
+                            minutes=(self.set_info or {}).get('minutes') or 45,
+                            mood=self.mood, speech=False)
+                    except Exception as exc:
+                        print("[auto_dj] no se pudo rearmar: %s" % exc)
+                        self.lock.acquire()
+                        self.current_queue = list(self.all_tracks)
+                        self.queue_index = 0
+                    finally:
+                        pass
+                    return
                 if self.shuffle_mode:
                     random.shuffle(self.current_queue)
                 self.queue_index = 0
@@ -815,7 +1000,167 @@ class DJLiviController:
             'queue_pos': q_pos,
             'shuffle': self.shuffle_mode,
             'status_msg': self.status_msg,
-            'offline': self.force_offline
+            'offline': self.force_offline,
+            'mood': self.mood,
+            'auto_dj': self.auto_dj,
+            'set_info': self.set_info,
+            'brain': self.brain.status_info(),
+            'chat_log': self.chat_log[-10:],
+        }
+
+    # ------------------------------------------------------- Auto-DJ / Livi
+    def library_summary(self):
+        if not self.folder_map:
+            return "sin carpetas"
+        parts = ["%s (%d)" % (name, len(tr))
+                 for name, tr in list(self.folder_map.items())[:12]]
+        return "; ".join(parts)
+
+    def build_auto_queue(self, minutes=45, mood=None, terms=None,
+                         speech=True, seed=None):
+        """Arma la cola con el motor de sets y la pone a sonar."""
+        mood = normalize_mood(mood) or normalize_mood(self.mood) or DEFAULT_MOOD
+        queue, info = build_set(self.all_tracks, minutes=minutes,
+                                mood=mood, terms=terms, seed=seed)
+        if not queue:
+            return {'success': False, 'error': info.get('error'),
+                    'reply': 'No encontre nada para armar el set.'}
+        self.mood = mood
+        self.set_info = info
+        with self.lock:
+            self.current_queue = queue
+            self.queue_index = 0
+            self.history = []
+        self.context_name = "Set %s (%d pistas)" % (
+            info.get('mood_label', mood), info['track_count'])
+        self.start_playback(trigger_speech=bool(speech))
+        return {'success': True, 'set_info': info}
+
+    def set_mood(self, mood):
+        """Cambia el mood y rearma la cola manteniendo la duracion actual."""
+        new_mood = normalize_mood(mood)
+        if not new_mood:
+            return {'success': False, 'error': 'mood_invalido',
+                    'reply': 'No conozco ese estado.'}
+        minutes = (self.set_info or {}).get('minutes') or 45
+        result = self.build_auto_queue(minutes=minutes, mood=new_mood)
+        self.status_msg = "Mood: %s" % new_mood
+        return result
+
+    def say(self, text):
+        """Hace que Livi diga algo por la mezcla (ducking)."""
+        text = (text or "").strip()
+        if not text:
+            return {'success': False, 'error': 'texto_vacio'}
+        try:
+            speech = self.commentator.prepare_speech(text, "livi_say.mp3")
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+        status = self.mixer.get_status()
+        if status.get('playing'):
+            self.mixer.play_voice_with_ducking(speech)
+        else:
+            self.mixer.play_track(self.mixer.get_status().get('track')
+                                  or self.current_queue[0])
+            time.sleep(0.3)
+            self.mixer.play_voice_with_ducking(speech)
+        with self.lock:
+            self.chat_log.append({'from': 'livi', 'text': text})
+        return {'success': True}
+
+    def ask(self, text):
+        """Peticion en lenguaje natural: 'pone algo tranqui para estudiar'."""
+        text = (text or "").strip()
+        if not text:
+            return {'success': False, 'error': 'texto_vacio'}
+        reply = None
+        if not self.brain.enabled or self.force_offline:
+            data = normalize_mood(text) and {
+                'action': 'play_mood',
+                'mood': normalize_mood(text),
+                'query': None, 'minutes': None,
+                'reply': 'Modo %s activado.' % normalize_mood(text)}
+        else:
+            summary = self.library_summary()
+            try:
+                data = self.brain.parse_request(text, summary)
+            except Exception as exc:
+                print("[brain] error: %s" % exc)
+                data = None
+        if not data:
+            data = {'action': 'chat', 'reply': None}
+
+        action = data.get('action', 'chat')
+        result = {'success': True, 'action': action}
+        reply = data.get('reply')
+
+        if action == 'play_mood' or (action == 'unknown' and normalize_mood(text)):
+            mood = normalize_mood(data.get('mood')) or normalize_mood(text) or DEFAULT_MOOD
+            minutes = data.get('minutes') or 45
+            res = self.build_auto_queue(minutes=minutes, mood=mood,
+                                        terms=data.get('query'), speech=False)
+            result.update(res)
+            reply = reply or "Armando una sesion de %d minutos." % minutes
+            self.say(reply)
+        elif action == 'play_folder':
+            folder = data.get('query')
+            if folder and folder in self.folder_map:
+                self.play_folder(folder)
+            else:
+                result.update({'success': False, 'reply':
+                               'No encontre esa carpeta.'})
+                return result
+        elif action == 'skip':
+            self.advance_track()
+        elif action == 'prev':
+            self.previous_track()
+        elif action == 'pause':
+            self.mixer.toggle_pause()
+        elif action == 'resume':
+            self.mixer.toggle_pause()
+        elif action == 'volume_up':
+            self.mixer.set_volume(90)
+        elif action == 'volume_down':
+            self.mixer.set_volume(30)
+        else:
+            status = self.get_info()
+            reply = self.brain.chat_reply(text, status) or \
+                "No te entendi bien, pero seguimos sonando."
+
+        reply = reply or "Listo."
+        with self.lock:
+            self.chat_log.append({'from': 'user', 'text': text})
+            self.chat_log.append({'from': 'livi', 'text': reply})
+            self.chat_log = self.chat_log[-20:]
+        result['reply'] = reply
+        return result
+
+    def listen(self):
+        """Escucha del microfono y ejecuta lo que se pida."""
+        if not self.voice.enabled or self.force_offline:
+            return {'success': False, 'reason': self.voice.status().get('reason')}
+        try:
+            text = self.voice.listen_and_transcribe()
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+        if not text:
+            return {'success': False, 'error': 'no_escuche_nada'}
+        result = self.ask(text)
+        result['heard'] = text
+        return result
+
+    def queue_snapshot(self):
+        with self.lock:
+            items = [{'title': t.get('title') or t.get('filename'),
+                      'artist': t.get('artist') or t.get('folder'),
+                      'energy': t.get('energy')} for t in self.current_queue]
+        return {
+            'index': self.queue_index,
+            'total': len(items),
+            'context': self.context_name,
+            'mood': self.mood,
+            'set_info': self.set_info,
+            'items': items[:50],
         }
 
 controller = None
@@ -823,6 +1168,27 @@ controller = None
 class DJRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
+
+    def _json(self, payload, code=200):
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _read_body(self):
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            return json.loads(raw.decode('utf-8'))
+        except Exception:
+            return {}
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -832,19 +1198,19 @@ class DJRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode('utf-8'))
         elif parsed.path == "/api/status":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(controller.get_info()).encode('utf-8'))
+            self._json(controller.get_info())
         elif parsed.path == "/api/library":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
             data = {
                 'folders': controller.folder_map,
                 'tracks': controller.all_tracks
             }
-            self.wfile.write(json.dumps(data).encode('utf-8'))
+            self._json(data)
+        elif parsed.path == "/api/queue":
+            self._json(controller.queue_snapshot())
+        elif parsed.path == "/api/brain":
+            self._json(controller.brain.status_info())
+        elif parsed.path == "/api/voice_status":
+            self._json(controller.voice.status())
         else:
             self.send_response(404)
             self.end_headers()
@@ -877,15 +1243,38 @@ class DJRequestHandler(BaseHTTPRequestHandler):
             t_id = int(qs.get('id', [-1])[0])
             if t_id >= 0:
                 controller.play_single_track(t_id)
+        elif parsed.path == "/api/ask":
+            data = self._read_body()
+            self._json(controller.ask(data.get('request') or qs.get('q', [''])[0]))
+            return
+        elif parsed.path == "/api/mood":
+            data = self._read_body()
+            self._json(controller.set_mood(data.get('mood')))
+            return
+        elif parsed.path == "/api/enqueue":
+            data = self._read_body()
+            self._json(controller.build_auto_queue(
+                minutes=float(data.get('minutes') or 45),
+                mood=data.get('mood'),
+                terms=data.get('terms') or data.get('query')))
+            return
+        elif parsed.path == "/api/say":
+            data = self._read_body()
+            self._json(controller.say(data.get('text')))
+            return
+        elif parsed.path == "/api/voice_listen":
+            self._json(controller.listen())
+            return
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(b'{"success": true}')
 
-def run_server(port=5000, force_offline=False):
+def run_server(port=5000, force_offline=False, enrich_audio=False):
     global controller
-    controller = DJLiviController(force_offline=force_offline)
+    controller = DJLiviController(force_offline=force_offline,
+                                  enrich_audio=enrich_audio)
     
     server_address = ('0.0.0.0', port)
     httpd = HTTPServer(server_address, DJRequestHandler)
@@ -893,6 +1282,8 @@ def run_server(port=5000, force_offline=False):
     print(f"OMNIPLAYER STUDIO - SERVIDOR WEB INICIADO")
     print(f"   Canciones detectadas: {len(controller.all_tracks)}")
     print(f"   Carpetas detectadas:  {len(controller.folder_map)}")
+    print(f"   Cerebro Livi: {controller.brain.status_info()}")
+    print(f"   Voz: {controller.voice.status()}")
     print(f"   URL: http://localhost:{port}")
     print(f"========================================================\n")
 
@@ -920,8 +1311,9 @@ def run_server(port=5000, force_offline=False):
 
 if __name__ == "__main__":
     offline_mode = "--offline" in sys.argv
+    enrich_audio = "--enrich-audio" in sys.argv
     port = 5000
     for arg in sys.argv:
         if arg.startswith("--port="):
             port = int(arg.split("=")[1])
-    run_server(port=port, force_offline=offline_mode)
+    run_server(port=port, force_offline=offline_mode, enrich_audio=enrich_audio)

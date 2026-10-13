@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# OmniPlayer / AI DJ
+# Instalacion:
+#   pip install -e .            # base: requests, mutagen, edge-tts, piper-tts
+#   pip install -e '.[audio]'   # extra: librosa (BPM y tonalidad reales)
+#   pip install -e '.[voz]'     # extra: microfono para comandos por voz
+#   pip install -e '.[dev]'     # extra: pytest
+
+[project]
+name = "ai-dj-omniplayer"
+version = "2.0.0"
+description = "OmniPlayer / AI DJ: reproductor con doble deck MPV, crossfade real, auto-DJ armonico y locucion por LLM"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "requests>=2.31",
+    "mutagen>=1.47",
+    "edge-tts>=7.0",
+    "piper-tts>=1.3",
+]
+
+[project.optional-dependencies]
+audio = ["librosa>=0.10"]
+voz = ["sounddevice>=0.4"]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+py-modules = [
+    "ai_dj",
+    "dj_brain",
+    "dj_commentator",
+    "dj_mixer",
+    "dj_mcp",
+    "music_scanner",
+    "set_engine",
+    "track_intel",
+    "voice_command",
+    "web_dj",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

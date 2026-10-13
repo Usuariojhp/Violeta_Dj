@@ -11,6 +11,10 @@ import threading
 from music_scanner import scan_all_device
 from dj_commentator import DJCommentator
 from dj_mixer import DJMixer
+from dj_brain import get_brain
+from track_intel import enrich_tracks
+from set_engine import build_set, next_mood, normalize_mood, DEFAULT_MOOD
+from voice_command import get_voice
 
 C_RESET = "\033[0m"
 C_BOLD = "\033[1m"
@@ -26,6 +30,8 @@ class DJLiviApp:
         self.force_offline = force_offline
         self.mixer = DJMixer()
         self.commentator = DJCommentator(force_offline=force_offline)
+        self.brain = get_brain()
+        self.voice = get_voice()
         self.all_tracks = []
         self.folder_map = {}
         
@@ -35,6 +41,7 @@ class DJLiviApp:
         self.shuffle_mode = False
         self.context_name = "Todo el dispositivo"
         self.status_msg = "Iniciando reproductor..."
+        self.mood = None
         self.running = True
 
     def setup(self):
@@ -45,6 +52,12 @@ class DJLiviApp:
             print(f"{C_RED}No se encontraron canciones en el dispositivo.{C_RESET}")
             sys.exit(1)
 
+        try:
+            self.all_tracks, report = enrich_tracks(self.all_tracks)
+            print(f"{C_GREEN}[OK] Metadatos: {report['enriched']} pistas enriquecidas.{C_RESET}")
+        except Exception as exc:
+            print(f"{C_YELLOW}[!] Sin enriquecimiento de metadatos: {exc}{C_RESET}")
+
         print(f"{C_GREEN}[OK] {total} canciones detectadas en {len(self.folder_map)} carpetas.{C_RESET}")
         for folder, tracks in list(self.folder_map.items())[:5]:
             print(f"  * {folder}: {len(tracks)} pistas")
@@ -53,6 +66,70 @@ class DJLiviApp:
         self.current_queue = list(self.all_tracks)
         self.queue_index = 0
         self.play_current_track(trigger_speech=True)
+
+    # ------------------------------------------------------------- Auto-DJ
+    def build_auto_queue(self, minutes=45, mood=None, terms=None):
+        """Arma un set armonico con el motor de sets y lo pone a sonar."""
+        mood = normalize_mood(mood) or self.mood or DEFAULT_MOOD
+        queue, info = build_set(self.all_tracks, minutes=minutes, mood=mood,
+                                terms=terms)
+        if not queue:
+            self.status_msg = "No encontre pistas para ese set."
+            return
+        self.mood = mood
+        self.current_queue = queue
+        self.queue_index = 0
+        self.history = []
+        self.context_name = "Set %s (%d pistas)" % (
+            info.get("mood_label", mood), info["track_count"])
+        self.status_msg = "Set %s - %d pistas - %.0f min" % (
+            info.get("mood_label", mood), info["track_count"],
+            info["minutes"])
+        self.play_current_track(trigger_speech=True)
+
+    def cycle_mood(self):
+        self.mood = next_mood(self.mood)
+        self.build_auto_queue(minutes=45, mood=self.mood)
+
+    def handle_voice(self):
+        """Escucha, interpreta con el cerebro y ejecuta lo pedido."""
+        if self.force_offline or not self.voice.enabled:
+            self.status_msg = "Voz no disponible (falta GROQ_API_KEY)."
+            return
+        try:
+            text = self.voice.listen_and_transcribe()
+        except Exception as exc:
+            self.status_msg = "Error de voz: %s" % exc
+            return
+        if not text:
+            self.status_msg = "No escuche nada."
+            return
+        data = self.brain.parse_request(text) or {"action": "unknown"}
+        action = data.get("action")
+        if action == "play_mood":
+            self.build_auto_queue(minutes=data.get("minutes") or 45,
+                                  mood=data.get("mood"),
+                                  terms=data.get("query"))
+        elif action == "skip":
+            self.advance_track()
+        elif action == "prev":
+            self.previous_track()
+        elif action == "pause":
+            self.mixer.toggle_pause()
+        elif action == "resume":
+            self.mixer.toggle_pause()
+        elif action == "volume_up":
+            self.mixer.set_volume(90)
+        elif action == "volume_down":
+            self.mixer.set_volume(30)
+        reply = data.get("reply")
+        if reply:
+            self.status_msg = f"[Livi] {reply}"
+            try:
+                speech = self.commentator.prepare_speech(reply, "livi_voice.mp3")
+                self.mixer.play_voice_with_ducking(speech)
+            except Exception:
+                pass
 
     def play_current_track(self, trigger_speech=False):
         if not self.current_queue:
@@ -194,6 +271,8 @@ class DJLiviApp:
         print(f"  [ESPACIO] Pausa/Play       [B / R] Pista anterior     [N] Siguiente pista")
         print(f"  [, / <-] Retroceder 10s    [. / ->] Adelantar 10s     [S] Shuffle ON/OFF")
         print(f"  [T] Todo el dispositivo    [Q] Salir")
+        print("  [A] Auto-DJ (set 45 min)   [M] Cambiar mood: " +
+              f"{C_MAGENTA}{self.mood or 'sin mood'}{C_RESET}   [V] Comando de voz")
         
         folders = list(self.folder_map.keys())
         if folders:
@@ -243,6 +322,13 @@ class DJLiviApp:
                         self.queue_index = 0
                         self.context_name = "Todo el dispositivo"
                         self.play_current_track(trigger_speech=False)
+                    elif ch in ('a', 'A'):
+                        self.build_auto_queue(minutes=45, mood=self.mood)
+                    elif ch in ('m', 'M'):
+                        self.cycle_mood()
+                    elif ch in ('v', 'V'):
+                        threading.Thread(target=self.handle_voice, daemon=True).start()
+                        self.status_msg = "Te escucho..."
                     elif ch in ('.', '>'):
                         self.seek_seconds(10)
                     elif ch in (',', '<'):

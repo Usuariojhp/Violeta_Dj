@@ -47,7 +47,18 @@ def clean_title_for_speech(raw_name):
         return None, name
 
 def get_search_roots():
-    """Obtiene las rutas raíz para escanear según si es Android o PC."""
+    """Obtiene las rutas raíz para escanear según si es Android o PC.
+
+    Se puede forzar con DJ_SCAN_ROOTS (rutas separadas por ':' o ','): util
+    para limitar el escaneo o para pruebas.
+    """
+    forced = os.environ.get("DJ_SCAN_ROOTS", "").strip()
+    if forced:
+        parts = [p for p in forced.replace(",", ":").split(":") if p]
+        roots = [os.path.expanduser(p) for p in parts]
+        if roots:
+            return roots
+
     roots = []
     # Android almacenamiento interno
     if os.path.exists('/sdcard'):
@@ -56,7 +67,7 @@ def get_search_roots():
         roots.append('/storage/emulated/0')
     
     # PC / Linux rutas estándar
-    home_dirs = ['~/Música', '~/Music', '~/Descargas', '~/Downloads', '~/Audio']
+    home_dirs = ['~/Música', '~/Music', '~/Descargas', '~/Downloads', '~/Audio', '~/videos of galery/Music', '~/videos of galery/musicas1', '~/run/media/josehp/Android SD']
     for d in home_dirs:
         expanded = os.path.expanduser(d)
         if os.path.exists(expanded) and expanded not in roots:

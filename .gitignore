@@ -7,3 +7,7 @@ voices/
 /tmp/
 .vscode/
 .idea/
+
+# secretos y locales
+.env
+.cache/
