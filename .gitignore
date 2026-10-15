@@ -11,3 +11,12 @@ voices/
 # secretos y locales
 .env
 .cache/
+
+# caches de Violeta
+covers/
+lyrics/
+pwa_icons/
+.library_cache.json
+dj_state.json
+web.log
+*.log

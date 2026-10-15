@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-dj_brain.py - Cerebro LLM multi-proveedor para el AI DJ (OmniPlayer).
+dj_brain.py - Cerebro LLM multi-proveedor para el AI DJ (Violeta).
 
 Proveedores gratuitos soportados (elegir con DJ_LLM_PROVIDER):
   - google      : Google AI Studio (Gemini)      -> key GOOGLE_API_KEY
@@ -28,7 +28,7 @@ CACHE_DIR = os.path.join(os.path.expanduser("~/.cache/ai_dj"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 PERSONA = (
-    "Sos Livi, la DJ de cabina de OmniPlayer. Hablas en espanol neutro y "
+    "Sos Livi, la DJ de cabina de Violeta. Hablas en espanol neutro y "
     "coloquial, como un DJ de radio nocturna. Frases cortas (max 14 palabras), "
     "sin emojis, sin comillas, sin signos raros. Nunca inventes canciones: "
     "solo hablas de la pista que te pasan."

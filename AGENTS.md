@@ -1,6 +1,6 @@
-# AGENTS.md - OmniPlayer / AI DJ
+# AGENTS.md - Violeta / AI DJ
 
-Reproductor de audio con doble deck MPV, crossfade real y DJ con voz (Livi).
+Reproductor de audio con doble deck MPV, crossfade real y DJ con voz (Violeta).
 Corre en Linux y en Android (Termux). Este documento es la fuente de verdad
 para cualquier agente que trabaje en este repo.
 
@@ -19,16 +19,19 @@ Tests: `python3 -m pytest tests/ -q`
 
 | Archivo | Rol |
 | --- | --- |
-| `music_scanner.py` | Escanea el dispositivo y arma `all_tracks` + `folder_map`. Parsea "Artista - Titulo". |
-| `dj_mixer.py` | Doble deck MPV (Deck A/B), crossfade, ducking de voz, volumen. |
-| `dj_commentator.py` | Guiones de Livi. Delega en el cerebro LLM, con fallback a plantillas. |
+| `music_scanner.py` | Escanea el dispositivo y arma `all_tracks` + `folder_map`. Parsea "Artista - Titulo". Cache TTL en `.library_cache.json`. |
+| `dj_mixer.py` | Doble deck MPV (Deck A/B), crossfade, ducking de voz, volumen 0-150, crossfade configurable. |
+| `dj_commentator.py` | Guiones de Violeta. Delega en el cerebro LLM, con fallback a plantillas. |
 | `dj_brain.py` | Cerebro LLM multi-proveedor (google / groq / openrouter). Sin keys -> modo plantillas. |
-| `track_intel.py` | Metadatos (mutagen), BPM/key opcional (librosa), cache en ~/.cache/ai_dj. |
+| `track_intel.py` | Metadatos (mutagen), BPM/key opcional (librosa), cache en ~/.cache/violeta. |
 | `set_engine.py` | Auto-DJ: mezcla armonica (Camelot), curva de energia por mood, variedad. |
 | `voice_command.py` | Comandos por voz: mic -> STT (Groq whisper). Opcional. |
-| `web_dj.py` | API HTTP stdlib (`/api/*`) + UI web embebida. |
+| `web_dj.py` | API HTTP stdlib (`/api/*`) + UI web embebida (PWA, caratulas, letras, favoritos, Telegram). |
 | `dj_mcp.py` | Servidor MCP (stdio) que expone el reproductor como tools para agentes. |
-| `.opencode/agent/dj.md` | Agente primario que opera el reproductor. |
+| `dj_state.py` | Persistencia de estado (favoritos, shuffle, crossfade, vol, ultima pista + pos). |
+| `pwa_assets.py` | Genera iconos y manifest para PWA instalable. |
+| `start_violeta.sh` | Launcher tmux (web + bot), auto-reinicio, wake-lock, IP. |
+| `.opencode/agent/violeta.md` | Agente primario que opera el reproductor. |
 
 ## Reglas duras
 
@@ -48,17 +51,17 @@ Tests: `python3 -m pytest tests/ -q`
 
 | Variable | Default | Para que |
 | --- | --- | --- |
-| `DJ_LLM_PROVIDER` | `google` | `google` \| `groq` \| `openrouter` |
+| `VIOLETA_LLM_PROVIDER` | `google` | `google` \| `groq` \| `openrouter` |
 | `GOOGLE_API_KEY` | - | cerebro con Google AI Studio |
 | `GROQ_API_KEY` | - | cerebro + STT (Whisper) con Groq |
 | `OPENROUTER_API_KEY` | - | cerebro con modelos `:free` de OpenRouter |
-| `DJ_LLM_MODEL` | por proveedor | forzar un modelo concreto |
-| `DJ_BRAIN_TIMEOUT` | `8` | segundos por llamada al LLM |
-| `DJ_BRAIN_DEBUG` | - | imprime por que cayo al fallback |
-| `DJ_API_URL` | `http://127.0.0.1:5000` | destino del servidor MCP |
+| `VIOLETA_LLM_MODEL` | por proveedor | forzar un modelo concreto |
+| `VIOLETA_BRAIN_TIMEOUT` | `8` | segundos por llamada al LLM |
+| `VIOLETA_BRAIN_DEBUG` | - | imprime por que cayo al fallback |
+| `VIOLETA_API_URL` | `http://127.0.0.1:5000` | destino del servidor MCP |
 
 ## MCP / agente
 
-El MCP `omniplayer` se levanta con `web_dj.py` corriendo. Para usarlo desde
+El MCP `violeta` se levanta con `web_dj.py` corriendo. Para usarlo desde
 opencode: reiniciar opencode dentro de esta carpeta (la config no se
-recarga en caliente) y elegir el agente `dj`.
+recarga en caliente) y elegir el agente `violeta`.

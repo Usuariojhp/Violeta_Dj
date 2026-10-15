@@ -1,12 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "omniplayer": {
+    "violeta": {
       "type": "local",
       "command": ["python3", "/home/josehp/ai_dj/dj_mcp.py"],
       "enabled": true,
       "environment": {
-        "DJ_API_URL": "http://127.0.0.1:5000"
+        "VIOLETA_API_URL": "http://127.0.0.1:5000"
       }
     }
   }

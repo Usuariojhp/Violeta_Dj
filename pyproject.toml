@@ -2,17 +2,17 @@
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-# OmniPlayer / AI DJ
+# Violeta / AI DJ
 # Instalacion:
 #   pip install -e .            # base: requests, mutagen, edge-tts, piper-tts
-#   pip install -e '.[audio]'   # extra: librosa (BPM y tonalidad reales)
+#   pip install -e '.[audio]'   # extra: librosa (BPM y tonalidad reales) + syncedlyrics (letras)
 #   pip install -e '.[voz]'     # extra: microfono para comandos por voz
 #   pip install -e '.[dev]'     # extra: pytest
 
 [project]
-name = "ai-dj-omniplayer"
+name = "violeta"
 version = "2.0.0"
-description = "OmniPlayer / AI DJ: reproductor con doble deck MPV, crossfade real, auto-DJ armonico y locucion por LLM"
+description = "Violeta: reproductor con doble deck MPV, crossfade real, auto-DJ armonico, caratulas, letras, PWA, Telegram y locucion por LLM"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-audio = ["librosa>=0.10"]
+audio = ["librosa>=0.10", "syncedlyrics>=0.3"]
 voz = ["sounddevice>=0.4"]
 dev = ["pytest>=8"]
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-dj_commentator.py - Generador de guiones y voz de locucion.
+dj_commentator.py - Generador de guiones y voz de locución.
 Soporta modo online (Edge-TTS) y modo 100% offline (Piper TTS local ultraligero).
+Delegación al cerebro LLM con fallback a plantillas.
 """
 import os
 import wave
@@ -33,18 +34,18 @@ class DJCommentator:
             except Exception as e:
                 pass
 
-    def _pick(self, brain_line, fallback_lines):
-        """Prioriza la linea del LLM; si no hay, usa las plantillas de siempre."""
-        if brain_line:
-            return brain_line
-        return random.choice(fallback_lines)
-
     def format_track_name(self, track):
         artist = track.get('artist')
         title = track.get('title')
         if artist and title:
             return f"{title} de {artist}"
         return title or track.get('filename', 'esta pista')
+
+    def _pick(self, brain_line, fallback_lines):
+        """Prioriza la linea del LLM; si no hay, usa las plantillas de siempre."""
+        if brain_line:
+            return brain_line
+        return random.choice(fallback_lines)
 
     def generate_welcome_script(self, context_name, first_track):
         track_str = self.format_track_name(first_track)

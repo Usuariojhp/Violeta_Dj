@@ -2,7 +2,7 @@
 # install_termux.sh - Instalador automatizado para Termux en Android
 
 echo "================================================="
-echo "🎧 INSTALANDO OMNIPLAYER DJ EN TU TELÉFONO"
+echo "🎧 INSTALANDO VIOLETA EN TU TELÉFONO"
 echo "================================================="
 
 # 1. Permisos de almacenamiento
@@ -25,29 +25,29 @@ pip install edge-tts
 
 # 4. Copiar carpeta y crear comandos binarios en el PATH
 echo "[4/4] Creando comandos directos..."
-mkdir -p "$HOME/ai_dj"
-if [ -d "/sdcard/ai_dj" ]; then
-    cp -r /sdcard/ai_dj/* "$HOME/ai_dj/"
+mkdir -p "$HOME/violeta"
+if [ -d "/sdcard/violeta" ]; then
+    cp -r /sdcard/violeta/* "$HOME/violeta/"
 fi
 
 # Crear scripts ejecutables en $PREFIX/bin para que funcionen siempre sin reiniciar la terminal
-cat <<'EOF' >"$PREFIX/bin/dj"
+cat << 'EOF' > "$PREFIX/bin/violeta"
 #!/data/data/com.termux/files/usr/bin/bash
-python "$HOME/ai_dj/ai_dj.py" "$@"
+python "$HOME/violeta/ai_dj.py" "$@"
 EOF
-chmod +x "$PREFIX/bin/dj"
+chmod +x "$PREFIX/bin/violeta"
 
-cat <<'EOF' >"$PREFIX/bin/dj-web"
+cat << 'EOF' > "$PREFIX/bin/violeta-web"
 #!/data/data/com.termux/files/usr/bin/bash
-python "$HOME/ai_dj/web_dj.py" "$@"
+python "$HOME/violeta/web_dj.py" "$@"
 EOF
-chmod +x "$PREFIX/bin/dj-web"
+chmod +x "$PREFIX/bin/violeta-web"
 
 echo ""
 echo "================================================="
 echo "✔ ¡INSTALACIÓN COMPLETADA!"
 echo "================================================="
 echo "Puedes ejecutar directamente:"
-echo "  ➔ dj-web    (Abre http://localhost:5000 con botones táctiles)"
-echo "  ➔ dj        (Modo terminal interactivo)"
+echo "  ➔ violeta-web    (Abre http://localhost:5000 con botones táctiles)"
+echo "  ➔ violeta        (Modo terminal interactivo)"
 echo "================================================="

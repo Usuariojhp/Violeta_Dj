@@ -2,11 +2,15 @@
 """
 dj_mixer.py - Motor de mezcla en tiempo real con doble deck (Deck A / Deck B),
 ducking para la voz del DJ y crossfade fluido usando MPV IPC.
+
+Mejoras: volumen maestro, lock de crossfade (evita peleas de volumen) y
+timeout de seguridad en el ducking de la voz.
 """
 import os
 import time
 import json
 import socket
+import tempfile
 import subprocess
 import threading
 
@@ -36,7 +40,7 @@ class MPVDeck:
             f'--input-ipc-server={self.socket_path}'
         ]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
+
         # Conectar al socket
         for _ in range(25):
             time.sleep(0.1)
@@ -57,7 +61,7 @@ class MPVDeck:
             try:
                 msg = (json.dumps({"command": cmd_list}) + "\n").encode('utf-8')
                 self.sock.sendall(msg)
-                
+
                 # Leer respuesta
                 data = b""
                 while b"\n" not in data:
@@ -114,7 +118,7 @@ class MPVDeck:
         self.send_command(["seek", seconds, "relative"])
 
     def set_volume(self, vol):
-        vol = max(0.0, min(100.0, float(vol)))
+        vol = max(0.0, min(150.0, float(vol)))
         self.set_property("volume", vol)
 
     def ramp_volume(self, target_vol, duration_sec=1.5, steps=15):
@@ -125,7 +129,7 @@ class MPVDeck:
         else:
             current_vol = float(current_vol)
 
-        step_delay = duration_sec / steps
+        step_delay = max(0.02, duration_sec / steps)
         vol_diff = target_vol - current_vol
 
         for i in range(1, steps + 1):
@@ -151,8 +155,6 @@ class MPVDeck:
                 pass
 
 
-import tempfile
-
 class DJMixer:
     def __init__(self):
         tmp = tempfile.gettempdir()
@@ -162,6 +164,9 @@ class DJMixer:
         self.active_deck = None
         self.current_track = None
         self.ducking_active = False
+        self.master_volume = 100.0
+        self.fade_token = 0
+        self.fade_lock = threading.Lock()
 
     def start(self):
         self.deck_a.start()
@@ -177,6 +182,15 @@ class DJMixer:
     def get_next_deck(self):
         return self.deck_b if self.active_deck == self.deck_a else self.deck_a
 
+    def _level(self, pct):
+        """Convierte un porcentaje (0-1) a volumen absoluto del deck según el volumen maestro."""
+        return max(0.0, min(150.0, self.master_volume * max(0.0, min(1.0, pct))))
+
+    def set_master_volume(self, vol):
+        self.master_volume = max(0.0, min(150.0, float(vol)))
+        if self.active_deck and not self.active_deck.is_idle():
+            self.active_deck.set_volume(self.master_volume)
+
     def play_track(self, track_info, crossfade_sec=4.0):
         """Reproduce una pista. Si ya hay una sonando, hace crossfade suave."""
         filepath = track_info['path']
@@ -185,58 +199,70 @@ class DJMixer:
         # Si no hay música sonando, arrancar directo
         if not self.active_deck or self.active_deck.is_idle():
             self.active_deck = self.deck_a
-            self.active_deck.set_volume(100)
+            self.active_deck.set_volume(self._level(1.0))
             self.active_deck.load(filepath)
             return
 
         old_deck = self.active_deck
         new_deck = self.get_next_deck()
 
+        # Invalidar cualquier crossfade anterior en curso
+        with self.fade_lock:
+            self.fade_token += 1
+            token = self.fade_token
+
         # Iniciar nueva pista con volumen 0
-        new_deck.set_volume(0)
+        new_deck.set_volume(self._level(0))
         new_deck.load(filepath)
         self.active_deck = new_deck
 
         # Crossfade en hilo para no bloquear el loop principal
         def do_crossfade():
             steps = 20
-            delay = crossfade_sec / steps
+            delay = max(0.05, crossfade_sec / steps)
             for i in range(1, steps + 1):
-                fade_out = 100.0 * (1.0 - (i / steps))
-                fade_in = 100.0 * (i / steps)
-                old_deck.set_volume(fade_out)
-                new_deck.set_volume(fade_in)
+                with self.fade_lock:
+                    # Si llegó un nuevo crossfade, cedemos el control de los decks
+                    if token != self.fade_token:
+                        return
+                    fade_out = self._level(1.0 - (i / steps))
+                    fade_in = self._level(i / steps)
+                    old_deck.set_volume(fade_out)
+                    new_deck.set_volume(fade_in)
                 time.sleep(delay)
-            old_deck.stop()
+            with self.fade_lock:
+                if token == self.fade_token:
+                    old_deck.stop()
 
         t = threading.Thread(target=do_crossfade, daemon=True)
         t.start()
 
-    def play_voice_with_ducking(self, voice_audio_path, duck_volume=20, duck_time=0.4):
+    def play_voice_with_ducking(self, voice_audio_path, duck_pct=0.20, duck_time=0.4, max_wait=30.0):
         """Baja la música suavemente (ducking), habla Livi, y restaura la música."""
         self.ducking_active = True
         active = self.active_deck
+        try:
+            # 1. Ducking suave de la música activa
+            if active and not active.is_idle():
+                active.ramp_volume(self._level(duck_pct), duration_sec=duck_time, steps=8)
 
-        # 1. Ducking suave de la música activa
-        if active and not active.is_idle():
-            active.ramp_volume(duck_volume, duration_sec=duck_time, steps=8)
+            # 2. Reproducir voz en el Voice Deck
+            self.deck_voice.set_volume(self._level(1.0))
+            self.deck_voice.load(voice_audio_path)
 
-        # 2. Reproducir voz en el Voice Deck
-        self.deck_voice.set_volume(100)
-        self.deck_voice.load(voice_audio_path)
-
-        # Esperar a que comience la voz
-        time.sleep(0.2)
-
-        # Esperar hasta que termine de hablar
-        while not self.deck_voice.is_idle():
-            time.sleep(0.1)
-
-        # 3. Restaurar música activa a volumen 100%
-        if active and not active.is_idle():
-            active.ramp_volume(100, duration_sec=duck_time, steps=8)
-
-        self.ducking_active = False
+            # 3. Esperar a que termine, con timeout de seguridad
+            waited = 0.0
+            while waited < max_wait:
+                if self.deck_voice.is_idle():
+                    break
+                time.sleep(0.1)
+                waited += 0.1
+        finally:
+            # 4. Restaurar música activa a volumen pleno SIEMPRE
+            if active and not active.is_idle():
+                active.ramp_volume(self._level(1.0), duration_sec=duck_time, steps=8)
+            self.deck_voice.stop()
+            self.ducking_active = False
 
     def seek(self, seconds):
         """Adelanta o retrocede segundos en la pista activa."""
@@ -260,7 +286,7 @@ class DJMixer:
                 'paused': False,
                 'ducking': self.ducking_active
             }
-        
+
         pos = self.active_deck.get_time_pos()
         dur = self.active_deck.get_duration()
         paused = self.active_deck.is_paused()

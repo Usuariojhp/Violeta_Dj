@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-dj_mcp.py - Servidor MCP (stdio) que expone OmniPlayer / AI DJ como
+dj_mcp.py - Servidor MCP (stdio) que expone Violeta / AI DJ como
 herramientas para agentes (opencode, Claude Code, etc.).
 
-Habla con la API HTTP del reproductor (web_dj.py) en DJ_API_URL.
+Habla con la API HTTP del reproductor (web_dj.py) en VIOLETA_API_URL.
 Requisito: web_dj.py corriendo (python3 web_dj.py). El servidor no depende
 de ninguna libreria externa: solo stdlib.
 """
@@ -13,11 +13,11 @@ import json
 import urllib.request
 import urllib.error
 
-DJ_API_URL = os.environ.get("DJ_API_URL", "http://127.0.0.1:5000").rstrip("/")
+VIOLETA_API_URL = os.environ.get("VIOLETA_API_URL", "http://127.0.0.1:5000").rstrip("/")
 
 
 def _http(method, path, payload=None):
-    url = DJ_API_URL + path
+    url = VIOLETA_API_URL + path
     data = None
     headers = {}
     if payload is not None:
