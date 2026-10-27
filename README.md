@@ -235,4 +235,6 @@ El bot (sesión `tg_bot`) también controla el reproductor. Requiere que el DJ e
 
 ## Licencia
 
-MIT License.
+Este proyecto está bajo la licencia **MIT** — ver el archivo [LICENSE](LICENSE).
+
+Puedes usar, copiar, modificar y distribuir libremente el código, incluido con fines comercionales, siempre que se conserve el aviso de copyright y la licencia.
