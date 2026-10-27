@@ -1774,6 +1774,15 @@ class DJLiviController:
                 except Exception:
                     pass
                 if pic is None:
+                    # FLAC / OGG: caratulas nativas en el objeto (f.pictures)
+                    try:
+                        flac_pics = getattr(f, 'pictures', None)
+                        if flac_pics:
+                            p0 = flac_pics[0]
+                            pic = (p0.data, p0.mime or 'image/jpeg')
+                    except Exception:
+                        pass
+                if pic is None:
                     try:
                         v = f.tags.get('metadata_block_picture')
                         if v:
@@ -1825,34 +1834,6 @@ class DJLiviController:
             return {'synced': False, 'lyrics': None}
         data = _lyrics_for(track.get('artist'), track.get('title'))
         return data or {'synced': False, 'lyrics': None}
-
-    def get_info(self):
-        status = self.mixer.get_status()
-        q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else "0/0"
-        track = status.get('track')
-        cover_url = None
-        if track and track.get('path'):
-            cover_path = self.get_cover(track['path'])
-            if cover_path:
-                cover_url = '/api/cover?path=' + cover_path
-        return {
-            'playing': status.get('playing', False),
-            'paused': status.get('paused', False),
-            'pos': status.get('pos', 0.0),
-            'dur': status.get('dur', 0.0),
-            'track': track,
-            'cover_url': cover_url,
-            'total_tracks': len(self.all_tracks),
-            'context_name': self.context_name,
-            'queue_pos': q_pos,
-            'shuffle': self.shuffle_mode,
-            'voice_enabled': self.voice_enabled,
-            'volume': int(self.mixer.master_volume),
-            'crossfade_sec': self.crossfade_sec,
-            'favorites': self.get_favorites(),
-            'status_msg': self.status_msg,
-            'offline': self.force_offline
-        }
 
     # --------------------------------------------------- IA / Auto-DJ --
     def library_summary(self):
@@ -1998,16 +1979,27 @@ class DJLiviController:
     def get_info(self):
         status = self.mixer.get_status()
         q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else "0/0"
+        track = status.get('track')
+        cover_url = None
+        if track and track.get('path'):
+            cover_path = self.get_cover(track['path'])
+            if cover_path:
+                cover_url = '/api/cover?path=' + cover_path
         return {
             'playing': status.get('playing', False),
             'paused': status.get('paused', False),
             'pos': status.get('pos', 0.0),
             'dur': status.get('dur', 0.0),
-            'track': status.get('track'),
+            'track': track,
+            'cover_url': cover_url,
             'total_tracks': len(self.all_tracks),
             'context_name': self.context_name,
             'queue_pos': q_pos,
             'shuffle': self.shuffle_mode,
+            'voice_enabled': self.voice_enabled,
+            'volume': int(self.mixer.master_volume),
+            'crossfade_sec': self.crossfade_sec,
+            'favorites': self.get_favorites(),
             'status_msg': self.status_msg,
             'offline': self.force_offline,
             'mood': self.mood,

@@ -20,8 +20,8 @@ from dj_mixer import DJMixer
 from dj_state import DjState
 from dj_brain import get_brain
 from set_engine import build_set, next_mood, normalize_mood, DEFAULT_MOOD
+from track_intel import enrich_tracks
 from voice_command import get_voice
-import threading
 
 ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -116,7 +116,7 @@ class DJLiviApp:
         return C_CYAN + '└' + self.H * self.W + '┘' + C_RESET
 
     def _line(self, content, color=C_RESET):
-        inner = _pad_ansi(_fit_ansi(content, self.W), self.W)
+        inner = _pad_ansi(_fit_ansi(content, self.W - 2), self.W - 2)
         return C_CYAN + '│' + C_RESET + ' ' + color + inner + C_RESET + ' ' + C_CYAN + '│' + C_RESET
 
     def _header(self):
