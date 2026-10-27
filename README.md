@@ -1,5 +1,10 @@
 # Violeta - Crossfade Studio
 
+![version](https://img.shields.io/badge/version-2.0.0-blue)
+![CI](https://github.com/Usuariojhp/Violeta_Dj/actions/workflows/ci.yml/badge.svg)
+![python](https://img.shields.io/badge/python-3.9%2B-green)
+![license](https://img.shields.io/github/license/Usuariojhp/Violeta_Dj)
+
 Reproductor de audio inteligente para **Linux** y **Android (Termux)** con arquitectura de doble consola MPV (Deck A / Deck B), crossfade continuo en tiempo real, detección automática de toda la biblioteca del dispositivo, navegación por carpetas, favoritos, carátulas, letras sincronizadas, locución por voz sintetizada, interfaz web instalable (PWA), control remoto por Telegram y **cerebro IA con Auto-DJ armónico, moods y comandos por voz**.
 
 ---
