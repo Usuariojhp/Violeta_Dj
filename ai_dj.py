@@ -11,9 +11,12 @@ import time
 import tty
 import re
 import select
-import termios
+import math
+import shutil
 import random
+import termios
 import threading
+import unicodedata
 from music_scanner import scan_all_device
 from dj_commentator import DJCommentator
 from dj_mixer import DJMixer
@@ -23,44 +26,156 @@ from set_engine import build_set, next_mood, normalize_mood, DEFAULT_MOOD
 from track_intel import enrich_tracks
 from voice_command import get_voice
 
-ANSI_RE = re.compile(r'\x1b\[[0-9;]*m')
+# ------------------------------------------------------------------ color --
+# Deteccion automatica de nivel de color:
+#   0 = sin color (NO_COLOR / TERM=dumb), 1 = 16 colores, 2 = 256, 3 = truecolor
 
-C_RESET = "\033[0m"
-C_BOLD = "\033[1m"
-C_GREEN = "\033[92m"
-C_CYAN = "\033[96m"
-C_YELLOW = "\033[93m"
-C_MAGENTA = "\033[95m"
-C_RED = "\033[91m"
-C_GRAY = "\033[90m"
+
+def _color_level():
+    if os.environ.get('NO_COLOR') is not None:
+        return 0
+    term = os.environ.get('TERM', '').strip().lower()
+    if term == 'dumb':
+        return 0
+    ct = os.environ.get('COLORTERM', '').strip().lower()
+    if ct in ('truecolor', '24bit') or 'truecolor' in term or '24bit' in term:
+        return 3
+    if '256' in term:
+        return 2
+    if term in ('', 'vt100', 'vt102', 'vt220', 'ansi', 'cons25', 'cons25w'):
+        return 1 if term else 0
+    if term.startswith(('xterm', 'screen', 'tmux', 'rxvt', 'linux', 'konsole', 'alacritty', 'kitty', 'st-')):
+        return 2
+    return 1
+
+
+COLOR_LEVEL = _color_level()
+
+
+def _rgb_to_256(r, g, b):
+    """Mapea RGB al cubo 6x6x6 / rampa gris de la paleta de 256 colores."""
+    def q(v):
+        return max(0, min(5, int(round(v / 51.0))))
+    cr, cg, cb = q(r), q(g), q(b)
+    if cr == cg == cb:
+        idx = max(0, min(23, int(round((max(r, g, b) - 8) / 10.0))))
+        return 232 + idx
+    return 16 + 36 * cr + 6 * cg + cb
+
+
+def _c(rgb, fallback16):
+    """Escape de color apropiado al nivel detectado (o vacio si no hay color)."""
+    if COLOR_LEVEL <= 0:
+        return ''
+    if COLOR_LEVEL >= 3:
+        return '\033[38;2;%d;%d;%dm' % rgb
+    if COLOR_LEVEL == 2:
+        return '\033[38;5;%dm' % _rgb_to_256(*rgb)
+    return fallback16
+
+
+def _bg(rgb, fallback16):
+    """Escape de color de fondo apropiado al nivel detectado."""
+    if COLOR_LEVEL <= 0:
+        return ''
+    if COLOR_LEVEL >= 3:
+        return '\033[48;2;%d;%d;%dm' % rgb
+    if COLOR_LEVEL == 2:
+        return '\033[48;5;%dm' % _rgb_to_256(*rgb)
+    return fallback16
+
+
+C_RESET = '\033[0m' if COLOR_LEVEL > 0 else ''
+C_BOLD = '\033[1m' if COLOR_LEVEL > 0 else ''
+C_DIMTXT = '\033[2m' if COLOR_LEVEL > 0 else ''
+C_UNDER = '\033[4m' if COLOR_LEVEL > 0 else ''
+
+# Paleta Violeta (truecolor) con fallback razonable a 16 colores.
+C_VIOLET = _c((167, 139, 250), '\033[95m')   # titulos
+C_ACCENT = _c((139, 92, 246), '\033[95m')    # acento principal
+C_PINK = _c((236, 72, 153), '\033[95m')      # calido
+C_CYAN = _c((34, 211, 238), '\033[96m')      # frio / detalles
+C_GREEN = _c((52, 211, 153), '\033[92m')     # ok / reproduciendo
+C_YELLOW = _c((251, 191, 36), '\033[93m')    # aviso / favorito
+C_RED = _c((248, 113, 113), '\033[91m')      # error / pausa
+C_MAGENTA = _c((217, 70, 239), '\033[95m')
+C_GRAY = _c((148, 163, 184), '\033[90m')     # texto secundario
+C_LABEL = _c((107, 114, 128), '\033[90m')    # etiquetas
+C_TEXT = _c((226, 232, 240), '\033[97m')     # texto principal
+C_BORDER = _c((96, 88, 140), '\033[90m')     # bordes de tarjeta
+C_BORDER_S = _c((71, 85, 105), '\033[90m')   # bordes suaves / separadores
 
 CROSSFADE_OPTIONS = [0, 3.0, 4.5, 6.0, 8.0]
 
+ANSI_RE = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]')
+
+_EA_CACHE = {}
+
+
+def _char_width(ch):
+    """Ancho de terminal de un caracter (1, 2 o 0)."""
+    w = _EA_CACHE.get(ch)
+    if w is None:
+        if unicodedata.combining(ch):
+            w = 0
+        elif unicodedata.east_asian_width(ch) in ('W', 'F'):
+            w = 2
+        else:
+            w = 1
+        _EA_CACHE[ch] = w
+    return w
+
+
+def _vis_len(content):
+    """Ancho visible ignorando secuencias ANSI."""
+    return sum(_char_width(c) for c in ANSI_RE.sub('', content))
+
 
 def _pad_ansi(content, width):
-    """Rellena a ancho fijo ignorando los códigos de color ANSI."""
-    visible = len(ANSI_RE.sub('', content))
-    return content + ' ' * max(0, width - visible)
+    """Rellena a ancho fijo ignorando los codigos de color ANSI."""
+    pad = width - _vis_len(content)
+    return content + ' ' * pad if pad > 0 else content
 
 
-def _fit_ansi(content, width):
-    """Trunca a un ancho visible sin romper ni perder los códigos de color ANSI."""
+def _fit_ansi(content, width, ellipsis=True):
+    """Trunca a un ancho visible sin romper ni perder los codigos ANSI."""
+    total = _vis_len(content)
+    if total <= width:
+        return content
+    if not ellipsis or width < 1:
+        target = width
+        add_ellipsis = False
+    else:
+        target = max(0, width - 1)
+        add_ellipsis = True
     res = []
     visible = 0
     i = 0
-    while i < len(content):
+    while i < len(content) and visible < target:
         m = ANSI_RE.match(content, i)
         if m:
             res.append(m.group(0))
             i = m.end()
             continue
-        if visible >= width:
-            res.append(C_RESET)
+        # Secuencia ANSI incompleta al final: ignorar resto
+        if content[i] == '\x1b':
+            break
+        w = _char_width(content[i])
+        if visible + w > target:
             break
         res.append(content[i])
-        visible += 1
+        visible += w
         i += 1
+    if add_ellipsis:
+        res.append('…')
+    res.append(C_RESET)
     return ''.join(res)
+
+
+def _lerp(c1, c2, t):
+    """Mezcla dos colores RGB con t en [0,1]."""
+    t = 0.0 if t < 0 else (1.0 if t > 1 else t)
+    return tuple(int(round(a + (b - a) * t)) for a, b in zip(c1, c2))
 
 
 class DJLiviApp:
@@ -104,162 +219,453 @@ class DJLiviApp:
         self.search_query = ''
         self.search_results = []
 
+        # Estado de la interfaz (dashboard)
+        self.show_help = False
+        self.folder_page = 0
+        self.browse_page = 0
+        self._eq_tick = 0
+
     # ------------------------------------------------------------------ UI --
 
-    def _top(self):
-        return C_CYAN + '┌' + self.H * 26 + C_RESET + C_BOLD + ' VIOLETA ' + C_RESET + C_CYAN + self.H * 27 + '┐' + C_RESET
+    SEL_BG = _bg((76, 29, 149), '\033[45m')
+    BAR_EMPTY = '░'
 
-    def _sep(self):
-        return C_CYAN + '├' + self.H * self.W + '┤' + C_RESET
+    # -- geometria de tarjetas ---------------------------------------------
 
-    def _bottom(self):
-        return C_CYAN + '└' + self.H * self.W + '┘' + C_RESET
+    def _card_top(self, width, left_label, right_label=None, right_color=None):
+        """Borde superior con pestanera de titulo (y opcional etiqueta a la derecha)."""
+        inner = max(4, width - 2)
+        left_seg = '─ ' + C_BOLD + C_VIOLET + left_label + C_RESET + C_BORDER + ' '
+        left_vis = _vis_len(left_seg)
+        if right_label:
+            rc = right_color or C_GREEN
+            # parte visible: " <label> ─"
+            right_vis = 1 + _vis_len(right_label) + 2
+            d = inner - left_vis - right_vis
+            if d < 1:
+                right_vis = 1
+                d = inner - left_vis - 1
+            right_seg = C_BORDER + ' ' + rc + right_label + C_BORDER + ' ─'
+        else:
+            right_vis = 1
+            d = inner - left_vis - 1
+            right_seg = C_BORDER + '─'
+        d = max(0, d)
+        return C_BORDER + '╭' + left_seg + ('─' * d) + right_seg + C_RESET
 
-    def _line(self, content, color=C_RESET):
-        inner = _pad_ansi(_fit_ansi(content, self.W - 2), self.W - 2)
-        return C_CYAN + '│' + C_RESET + ' ' + color + inner + C_RESET + ' ' + C_CYAN + '│' + C_RESET
+    def _card_line(self, width, content='', color=C_RESET, right=None, right_color=None):
+        cw = max(4, width - 4)
+        if right is not None:
+            gap = cw - _vis_len(content) - _vis_len(right)
+            if gap < 1:
+                content = _fit_ansi(content, max(0, cw - _vis_len(right) - 1))
+                gap = cw - _vis_len(content) - _vis_len(right)
+            content = content + (' ' * max(0, gap)) + right
+        inner = _pad_ansi(_fit_ansi(content, cw), cw)
+        return (C_BORDER + '│' + C_RESET + ' ' + color + inner + C_RESET +
+                ' ' + C_BORDER + '│' + C_RESET)
 
-    def _header(self):
-        mode_tag = f"{C_GREEN}ONLINE{C_RESET}" if not self.force_offline else f"{C_RED}OFFLINE{C_RESET}"
-        shuf_tag = f"{C_GREEN}ON{C_RESET}" if self.shuffle_mode else f"{C_GRAY}OFF{C_RESET}"
-        voice_tag = f"{C_GREEN}ON{C_RESET}" if self.voice_enabled else f"{C_GRAY}OFF{C_RESET}"
-        xf_label = f"{self.crossfade_sec:.1f}s" if self.crossfade_sec > 0 else "OFF"
-        print(self._top())
-        print(self._line("CROSSFADE STUDIO", C_GRAY))
-        print(self._line(f"Modo: {mode_tag}   Shuffle: {shuf_tag}   Voz: {voice_tag}    Crossfade: {xf_label}"))
-        print(self._line(f"Pistas: {len(self.all_tracks)}   Contexto: {self.context_name}   Favoritos: {len(self.favorites)}", C_GRAY))
+    def _card_sel(self, width, content, color=C_RESET):
+        """Linea de lista con barra de seleccion a todo el ancho interior."""
+        cw = max(4, width - 4)
+        inner = _pad_ansi(_fit_ansi(content, cw), cw)
+        return (C_BORDER + '│' + C_RESET + self.SEL_BG + ' ' + color + inner +
+                C_RESET + self.SEL_BG + ' ' + C_RESET + C_BORDER + '│' + C_RESET)
 
-    def _render_main(self):
+    def _card_bottom(self, width):
+        return C_BORDER + '╰' + ('─' * max(4, width - 2)) + '╯' + C_RESET
+
+    def _card(self, width, title, lines, right_title=None, right_color=None,
+              selected=None, color=C_GRAY):
+        """Tarjeta completa: borde superior + cuerpo + borde inferior."""
+        out = [self._card_top(width, title, right_title, right_color)]
+        for i, ln in enumerate(lines):
+            if selected is not None and i == selected:
+                out.append(self._card_sel(width, ln, color))
+            else:
+                out.append(self._card_line(width, ln, color))
+        out.append(self._card_bottom(width))
+        return out
+
+    @staticmethod
+    def _merge_cols(left, right, gap=2):
+        if not right:
+            return list(left)
+        n = max(len(left), len(right))
+        out = []
+        for i in range(n):
+            l = left[i] if i < len(left) else ''
+            r = right[i] if i < len(right) else ''
+            out.append(l + (' ' * gap) + r)
+        return out
+
+    def _layout(self):
+        cols = max(40, shutil.get_terminal_size((100, 30)).columns)
+        if cols >= 94:
+            total = min(cols - 2, 104)
+            gap = 2
+            left = int(round((total - gap) * 0.62))
+            left = max(46, min(left, total - gap - 34))
+            right = total - gap - left
+            return {'total': total, 'left': left, 'right': right,
+                    'two': right >= 30, 'cols': cols}
+        total = min(cols, 100)
+        return {'total': total, 'left': total, 'right': 0, 'two': False, 'cols': cols}
+
+    # -- piezas visuales ----------------------------------------------------
+
+    def _progress_bar(self, pct, bar_w):
+        """Barra con bloques fraccionarios y degradado violeta -> cian."""
+        pct = 0.0 if pct < 0 else (1.0 if pct > 1 else pct)
+        exact = pct * bar_w
+        full = int(exact)
+        rem = int(round((exact - full) * 8))
+        if rem > 7:
+            rem = 7
+        add_part = full < bar_w and rem > 0
+        filled = '█' * full + ('▏▎▍▌▋▊▉'[rem - 1] if add_part else '')
+        empties = max(0, bar_w - full - (1 if add_part else 0))
+        n_filled = full + (1 if add_part else 0)
+        if COLOR_LEVEL > 0 and n_filled > 0:
+            segs = []
+            for i, ch in enumerate(filled):
+                t = (i / (n_filled - 1)) if n_filled > 1 else 0.0
+                segs.append(_c(_lerp((139, 92, 246), (34, 211, 238), t), C_CYAN) + ch)
+            head = ''.join(segs) + C_RESET
+        else:
+            head = (C_VIOLET + filled + C_RESET) if filled else ''
+        return head + C_BORDER_S + (self.BAR_EMPTY * empties) + C_RESET
+
+    def _eq(self, playing, bars=8):
+        """Mini ecualizador animado (se congela en pausa)."""
+        if not playing:
+            return C_BORDER_S + ('·' * bars) + C_RESET
+        self._eq_tick = getattr(self, '_eq_tick', 0) + 1
+        out = []
+        blocks = '▁▂▃▄▅▆▇█'
+        for i in range(bars):
+            v = (math.sin(self._eq_tick * 0.85 + i * 1.15) *
+                 math.cos(self._eq_tick * 0.31 + i * 0.55))
+            lvl = min(6, int(abs(v) * 7))
+            t = i / max(1, bars - 1)
+            out.append(_c(_lerp((236, 72, 153), (34, 211, 238), t), C_CYAN) + blocks[lvl])
+        return ''.join(out) + C_RESET
+
+    def _chip(self, text, fg, bg_rgb):
+        """Pastilla tipo [ chill ] con fondo suave."""
+        return ' ' + _bg(bg_rgb, '') + fg + ' ' + text + ' ' + C_RESET + ' '
+
+    def _state_tag(self, status):
+        if status.get('ducking'):
+            return '● LIVI', C_YELLOW
+        if status.get('paused'):
+            return '● PAUSA', C_RED
+        if status.get('playing'):
+            return '● REPRODUCIENDO', C_GREEN
+        return '● DETENIDO', C_GRAY
+
+    # -- pantallas ----------------------------------------------------------
+
+    def _brand_card(self, width, status):
+        state, state_c = self._state_tag(status)
+        mode = 'OFFLINE' if self.force_offline else 'ONLINE'
+        mode_c = C_RED if self.force_offline else C_GREEN
+        stats = (f"{C_BOLD}{len(self.all_tracks)}{C_RESET}{C_LABEL} pistas{C_RESET}  "
+                 f"{C_LABEL}·{C_RESET}  {C_BOLD}{len(self.folder_map)}{C_RESET}{C_LABEL} carpetas{C_RESET}  "
+                 f"{C_LABEL}·{C_RESET}  {C_BOLD}★{len(self.favorites)}{C_RESET}")
+        right = self.status_msg or state
+        lines = [self._card_line(width, stats, right=f"{mode_c}{mode}{C_RESET}",
+                                 color=C_GRAY)]
+        return [self._card_top(width, 'VIOLETA · CROSSFADE STUDIO',
+                               state, state_c)] + lines + [self._card_bottom(width)]
+
+    def _np_card(self, width):
         status = self.mixer.get_status()
         track = status.get('track')
-        pos = status.get('pos', 0.0)
-        dur = status.get('dur', 0.0)
-        paused = status.get('paused', False)
-        ducking = status.get('ducking', False)
+        pos = float(status.get('pos', 0.0))
+        dur = float(status.get('dur', 0.0))
+        q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else '0/0'
+        state, state_c = self._state_tag(status)
 
-        print(self._sep())
-        if ducking:
-            print(self._line(f"[LIVI] {self.status_msg}", C_YELLOW))
-        elif paused:
-            print(self._line("[PAUSA]", C_RED))
-        else:
-            print(self._line(f"[PLAY] {self.status_msg}", C_GREEN))
-
+        body = []
         if track:
-            title = track.get('title') or track.get('filename')
-            artist = track.get('artist') or track.get('folder')
-            folder = track.get('folder') or ''
-            q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else "0/0"
-            is_fav = track.get('path') in self.favorites
-            star = f"{C_YELLOW}*{C_RESET} " if is_fav else ""
-            print(self._line(star + f"{C_CYAN}{C_BOLD}{title}{C_RESET}  {C_GRAY}[{q_pos}]{C_RESET}", C_CYAN))
-            print(self._line(f"Artista : {artist}", C_GREEN))
-            print(self._line(f"Carpeta : {folder}", C_GRAY))
+            title = track.get('title') or track.get('filename') or 'Sin pista'
+            artist = track.get('artist') or track.get('folder') or ''
+            album = track.get('folder') or ''
+            fav = track.get('path') in self.favorites
+            star = (C_YELLOW + '★ ' + C_RESET) if fav else ''
+            body.append(star + C_BOLD + C_VIOLET + title + C_RESET)
+            body.append('   ' + C_CYAN + artist + C_RESET)
+            body.append('   ' + C_LABEL + album + C_RESET)
+            body.append('')
 
-            pct = min(1.0, max(0.0, (pos / dur))) if dur > 0 else 0.0
-            bar_len = 30
-            filled = int(round(bar_len * pct))
-            bar = ('█' * filled).ljust(bar_len, '░')
-            time_str = f"{self.format_time(pos)} / {self.format_time(dur)}"
-            pct_str = f"{pct * 100:3.0f}%"
-            print(self._line(f"{C_GREEN}{bar}{C_RESET} {C_CYAN}{time_str}{C_RESET} {C_BOLD}{pct_str}{C_RESET}"))
+            pct = min(1.0, max(0.0, pos / dur)) if dur > 0 else 0.0
+            bar_w = max(18, width - 24)
+            bar = self._progress_bar(pct, bar_w)
+            times = f"{C_CYAN}{self.format_time(pos)}{C_RESET}{C_LABEL} / {C_RESET}{self.format_time(dur)}{C_RESET}"
+            body.append('  ' + bar + '  ' + C_BOLD + f"{pct * 100:3.0f}%" + C_RESET)
+
+            chips = f"  {self._eq(status.get('playing') and not status.get('paused'))}  {times}"
+            meta = []
+            if self.mood:
+                meta.append(self._chip(f"mood:{self.mood}", C_PINK, (60, 20, 55)))
+            if self.auto_dj:
+                meta.append(self._chip('auto-dj', C_VIOLET, (46, 28, 92)))
+            meta_s = (''.join(meta)).rstrip()
+            body.append(chips)
+            if meta_s:
+                body.append('  ' + meta_s)
         else:
-            print(self._line(f"{C_GRAY}Sin pista activa..." + C_RESET, C_GRAY))
+            body.append(C_LABEL + 'Sin pista activa. Pulsa T para reproducir todo.' + C_RESET)
+            body += [''] * 6
 
-        print(self._sep())
-        print(self._line(f"{C_BOLD}SPACE{C_RESET} Play/Pause   {C_BOLD}N{C_RESET} Next   {C_BOLD}B{C_RESET} Prev   {C_BOLD}S{C_RESET} Shuffle   {C_BOLD}F{C_RESET} Fav"))
-        print(self._line(f"{C_BOLD}<{C_RESET}/ {C_BOLD},{C_RESET} -10s   {C_BOLD}>{C_RESET}/ {C_BOLD}.{C_RESET} +10s   {C_BOLD}E{C_RESET} Explorar   {C_BOLD}C{C_RESET} Cola   {C_BOLD}H{C_RESET} Historial"))
-        print(self._line(f"{C_BOLD}/{C_RESET} Buscar   {C_BOLD}V{C_RESET} Voz   {C_BOLD}X{C_RESET} Crossfade   {C_BOLD}Q{C_RESET} Salir"))
+        lines = body[:7]
+        while len(lines) < 7:
+            lines.append('')
+        return self._card(width, 'REPRODUCIENDO', lines, state, state_c)
 
-        if self.folder_names:
-            print(self._sep())
-            for start in range(0, len(self.folder_names), 3):
-                row = ""
-                for j, f in enumerate(self.folder_names[start:start + 3]):
-                    row += f"{C_BOLD}[{start + j + 1}]{C_RESET} {C_CYAN}{f}{C_RESET}({len(self.folder_map[f])})  "
-                print(self._line(row.rstrip(), C_GRAY))
-
-    def _render_browse(self):
-        print(self._sep())
-        if self.browse_level == 'folders':
-            print(self._line(f"{C_BOLD}Carpetas  {C_GRAY}(flechitas / Enter para reproducir){C_RESET}"))
-            for i, f in enumerate(self.folder_names):
-                mark = f"{C_GREEN}>{C_RESET} " if i == self.browse_sel else "  "
-                sel = f"{C_CYAN}{C_BOLD}{f}{C_RESET}" if i == self.browse_sel else f"{C_RESET}{f}{C_RESET}" if False else f
-                label = mark + sel
-                if i == self.browse_sel:
-                    print(self._line(C_CYAN + label, C_CYAN))
-                else:
-                    print(self._line(label, C_GRAY))
-            print(self._line(f"{C_GRAY}-> para expandir a canciones   ESC: volver{C_RESET}", C_GRAY))
-        else:
-            name = self.browse_folder
-            print(self._line(f"{C_BOLD}{name}  {C_GRAY}({len(self.browse_tracks)} pistas){C_RESET}"))
-            shown = self.browse_tracks[max(0, self.browse_sel - 4):][:9]
-            offset = max(0, self.browse_sel - 4)
-            for i, t in enumerate(shown):
-                abs_idx = offset + i
-                title = (t.get('title') or t.get('filename'))[:40]
-                mark = f"{C_GREEN}>{C_RESET} " if abs_idx == self.browse_sel else "  "
-                line_txt = mark + title
-                if abs_idx == self.browse_sel:
-                    print(self._line(C_CYAN + line_txt, C_CYAN))
-                else:
-                    print(self._line(line_txt, C_GRAY))
-            print(self._line(f"{C_GRAY}<- para volver a carpetas   Enter: reproducir   ESC: salir{C_RESET}", C_GRAY))
-
-    def _render_queue_view(self):
-        print(self._sep())
-        print(self._line(f"{C_BOLD}COLA  {C_GRAY}(Siguientes pistas){C_RESET}"))
+    def _queue_card(self, width):
         n = len(self.current_queue)
-        for k in range(1, 10):
+        rows = []
+        for k in range(1, 6):
             idx = self.queue_index + k
             if idx >= n:
                 break
             t = self.current_queue[idx]
-            title = (t.get('title') or t.get('filename'))[:44]
-            prefix = f"{C_CYAN}{k:>2}{C_RESET} " if k < 10 else "   "
-            print(self._line(prefix + f"{C_GRAY}{title}{C_RESET}", C_GRAY))
-        if n <= self.queue_index + 1:
-            print(self._line(f"{C_GRAY}(fin de la cola){C_RESET}", C_GRAY))
-        print(self._line(f"{C_GRAY}ESC: volver   espacio: reproducir/PAUSA{C_RESET}", C_GRAY))
+            title = t.get('title') or t.get('filename') or ''
+            num = f"{C_VIOLET}{k:>2}{C_RESET}  "
+            rows.append(num + C_GRAY + title + C_RESET)
+        while len(rows) < 5:
+            rows.append('')
+        rows.append('')
+        rows.append(C_LABEL + 'C para ver toda la cola' + C_RESET)
+        right_t = f"{self.queue_index + 1}/{n}" if n else '0/0'
+        return self._card(width, 'A CONTINUACIÓN', rows,
+                          right_t, C_CYAN, color=C_TEXT)
 
-    def _render_history_view(self):
-        print(self._sep())
-        print(self._line(f"{C_BOLD}HISTORIAL  {C_GRAY}(ultimas reproducidas){C_RESET}"))
-        if not self.history:
-            print(self._line(f"{C_GRAY}(vacio){C_RESET}", C_GRAY))
-        for i, t in enumerate(reversed(self.history[-9:])):
-            title = (t.get('title') or t.get('filename'))[:46]
-            print(self._line(f" {C_CYAN}{i + 1:>2}{C_RESET} {C_GRAY}{title}{C_RESET}", C_GRAY))
-        print(self._line(f"{C_GRAY}ESC: volver{C_RESET}", C_GRAY))
+    def _folders_card(self, width, body_rows):
+        if not self.folder_names:
+            return []
+        self._folders_body_rows = max(1, body_rows)
+        per_line = 3 if width >= 80 else 1
+        lines_per_page = self._folders_body_rows
+        per_page = lines_per_page * per_line
+        pages = max(1, math.ceil(len(self.folder_names) / per_page))
+        page = max(0, min(self.folder_page, pages - 1))
+        self.folder_page = page
+        start = page * per_page
+        chunk = self.folder_names[start:start + per_page]
 
-    def _render_search(self):
-        print(self._sep())
-        print(self._line(f"{C_BOLD}Buscar: {C_RESET}{C_GREEN}{self.search_query}{C_RESET}{C_GRAY}_{C_RESET}", C_GREEN))
-        for i, t in enumerate(self.search_results[:6]):
-            title = (t.get('title') or t.get('filename'))[:38]
-            artist = (t.get('artist') or t.get('folder'))[:14]
-            icon = f"{C_GREEN}>{C_RESET} " if i == 0 else "  "
-            print(self._line(icon + f"{C_CYAN}{title}{C_RESET} {C_GRAY}- {artist}{C_RESET}", C_GRAY))
-        if not self.search_results and self.search_query:
-            print(self._line("  Sin resultados...", C_GRAY))
-        print(self._line(f"{C_GRAY}Enter: reproducir el primero   ESC / borrar: cancelar{C_RESET}", C_GRAY))
+        cw = max(10, (width - 4 - (per_line - 1) * 2) // per_line)
+
+        rows = []
+        for i in range(0, len(chunk), per_line):
+            cells = []
+            for j, name in enumerate(chunk[i:i + per_line]):
+                idx = start + i + j
+                count = len(self.folder_map.get(name, []))
+                num = f"{C_BOLD}{idx + 1:>3}{C_RESET}"
+                cell = f"{num}{C_LABEL}.{C_RESET}{C_CYAN}{name}{C_RESET} {C_LABEL}({count}){C_RESET}"
+                cells.append(_fit_ansi(cell, cw))
+            rows.append('  '.join(cells))
+        while len(rows) < lines_per_page:
+            rows.append('')
+
+        rt = f"pág {page + 1}/{pages}" if pages > 1 else f"{len(self.folder_names)}"
+        return self._card(width, 'CARPETAS · 1-8 reproduce directo', rows, rt, C_PINK)
+
+    def _list_screen(self, lay, title, items, hint, right_title=None,
+                     right_color=None, numbered=False, offset=0, sel=None):
+        """Pantalla de lista completa (cola / historial / explorador / busqueda)."""
+        w = lay['total']
+        rows_avail = max(3, lay.get('rows_avail', 12))
+        body = []
+        self._list_sel = sel
+        for i, txt in enumerate(items):
+            if numbered:
+                body.append(f"{C_VIOLET}{i + 1 + offset:>2}{C_RESET}  {C_GRAY}{txt}{C_RESET}")
+            else:
+                body.append(txt)
+        total_rows = max(1, rows_avail - 1)
+        shown = body[:total_rows]
+        while len(shown) < total_rows:
+            shown.append('')
+        if hint:
+            shown[-1] = C_LABEL + hint + C_RESET
+        selected = 0 if sel is not None else None
+        if sel is not None and sel < len(body) and sel < total_rows:
+            selected = sel
+        return self._card(w, title, shown, right_title, right_color,
+                          selected=selected, color=C_TEXT)
+
+    def _status_bar(self, width):
+        bits = []
+        bits.append((C_GREEN if not self.force_offline else C_RED) +
+                    ('● online' if not self.force_offline else '● offline') + C_RESET)
+        bits.append(C_LABEL + 'shuffle' + C_RESET + ' ' +
+                    (C_GREEN + 'ON' + C_RESET if self.shuffle_mode else C_GRAY + 'OFF' + C_RESET))
+        bits.append(C_LABEL + 'voz' + C_RESET + ' ' +
+                    (C_GREEN + 'ON' + C_RESET if self.voice_enabled else C_GRAY + 'OFF' + C_RESET))
+        xf = f"{self.crossfade_sec:.1f}s" if self.crossfade_sec > 0 else 'off'
+        bits.append(C_LABEL + 'xfade' + C_RESET + ' ' + C_CYAN + xf + C_RESET)
+        if self.mood:
+            bits.append(C_LABEL + 'mood' + C_RESET + ' ' + C_PINK + str(self.mood) + C_RESET)
+        bits.append(C_BOLD + '? ayuda' + C_RESET)
+        line = '  ' + C_LABEL + ' · '.join(bits) + C_RESET
+        return _fit_ansi(line, width, ellipsis=False)
+
+    def _help_screen(self, lay):
+        w = lay['total']
+        half = w // 2
+        left = [
+            f"{C_BOLD}ESPACIO{C_RESET}  pausa / reanudar",
+            f"{C_BOLD}N{C_RESET}       siguiente pista",
+            f"{C_BOLD}B{C_RESET}       anterior pista",
+            f"{C_BOLD}S{C_RESET}       shuffle on/off",
+            f"{C_BOLD}F{C_RESET}       favorito",
+            f"{C_BOLD}X{C_RESET}       ciclar crossfade",
+            f"{C_BOLD}V{C_RESET}       voz on/off",
+        ]
+        right = [
+            f"{C_BOLD}A{C_RESET}       auto-dj (45 min)",
+            f"{C_BOLD}M{C_RESET}       cambiar mood",
+            f"{C_BOLD}Z{C_RESET}       comando de voz",
+            f"{C_BOLD}E{C_RESET}       explorar carpetas",
+            f"{C_BOLD}C{C_RESET} / {C_BOLD}H{C_RESET}   cola / historial",
+            f"{C_BOLD}/{C_RESET}       buscar",
+            f"{C_BOLD}T{C_RESET}       todo el dispositivo",
+        ]
+        extra = [f"{C_BOLD}←{C_RESET}/{C_BOLD}→{C_RESET} ±10s    {C_BOLD}[{C_RESET}/{C_BOLD}]{C_RESET} pagina de carpetas    {C_BOLD}Q{C_RESET} salir"]
+        merged = self._merge_cols(
+            [self._card_line(half, ln, C_TEXT) for ln in left],
+            [self._card_line(w - half - 2, ln, C_TEXT) for ln in right], 2)
+        body = merged + [self._card_line(w, extra[0], C_LABEL)]
+        return self._card(w, 'AYUDA · pulsa ? para cerrar', body, 'violeta', C_PINK,
+                          color=C_TEXT)
+
+    def _emit(self, lines):
+        sys.stdout.write('\033[H\033[J' + '\n'.join(lines) + '\n')
+        sys.stdout.flush()
 
     def render_ui(self):
-        sys.stdout.write("\033[H\033[J")
-        self._header()
+        lay = self._layout()
+        rows = shutil.get_terminal_size((100, 30)).lines
+        status = self.mixer.get_status()
+
+        if self.show_help:
+            self._emit(self._help_screen(lay) + [self._status_bar(lay['total'])])
+            return
+
         if self.search_active:
-            self._render_search()
-        elif self.mode == 'browse':
-            self._render_browse()
-        elif self.mode == 'queue':
-            self._render_queue_view()
-        elif self.mode == 'history':
-            self._render_history_view()
+            items = []
+            for i, t in enumerate(self.search_results[:8]):
+                title = t.get('title') or t.get('filename') or ''
+                artist = t.get('artist') or t.get('folder') or ''
+                mark = C_GREEN + '▸ ' + C_RESET if i == 0 else '  '
+                items.append(mark + C_VIOLET + title + C_RESET + '  ' + C_LABEL + '· ' + artist + C_RESET)
+            head = C_BOLD + 'Buscar: ' + C_RESET + C_CYAN + self.search_query + C_RESET + C_LABEL + '_' + C_RESET
+            lay['rows_avail'] = max(3, rows - 7)
+            scr = [self._card_top(lay['total'], 'BUSCAR', f"{len(self.search_results)} resultados", C_CYAN)]
+            scr.append(self._card_line(lay['total'], head))
+            body_h = max(2, rows - 6)
+            for i, txt in enumerate(items[:body_h]):
+                scr.append(self._card_line(lay['total'], txt, C_TEXT, ))
+            for _ in range(max(0, body_h - len(items))):
+                scr.append(self._card_line(lay['total'], ''))
+            scr.append(self._card_line(lay['total'],
+                                       C_LABEL + 'Enter reproduce el primero · Esc cancela' + C_RESET))
+            scr.append(self._card_bottom(lay['total']))
+            self._emit(scr + [self._status_bar(lay['total'])])
+            return
+
+        if self.mode != 'main':
+            self._emit(self._alt_screen(lay, rows) + [self._status_bar(lay['total'])])
+            return
+
+        # --- pantalla principal -------------------------------------------
+        brand = self._brand_card(lay['total'], status)
+        np_card = self._np_card(lay['left'])
+        q_card = self._queue_card(lay['right']) if lay['two'] else []
+        head_h = len(brand) + 1 + max(len(np_card), len(q_card)) + 1 + 1
+        avail = max(4, rows - head_h)
+        folders = self._folders_card(lay['total'], avail - 2) if self.folder_names else []
+
+        if lay['two']:
+            body = self._merge_cols(np_card, q_card, 2)
         else:
-            self._render_main()
-        print(self._bottom())
+            body = np_card + q_card
+        out = brand + [''] + body + ['']
+        out += folders
+        self._emit(out + [self._status_bar(lay['total'])])
+
+    def _alt_screen(self, lay, rows):
+        w = lay['total']
+        lay['rows_avail'] = max(4, rows - 6)
+        if self.mode == 'browse':
+            if self.browse_level == 'folders':
+                names = self.folder_names
+                items = []
+                for i, f in enumerate(names):
+                    count = len(self.folder_map.get(f, []))
+                    mark = C_GREEN + '▸ ' + C_RESET if i == self.browse_sel else '  '
+                    items.append(mark + C_VIOLET + f + C_RESET + C_LABEL + f'  ({count})' + C_RESET)
+                # paginacion que sigue la seleccion (auto-scroll)
+                per = max(1, lay['rows_avail'] - 2)
+                page = (self.browse_sel // per) if items else 0
+                self.browse_page = page
+                vis = items[page * per:(page + 1) * per]
+                sel = self.browse_sel - page * per
+                sel = sel if 0 <= sel < len(vis) else None
+                rt = f"pág {page + 1}/{max(1, math.ceil(len(items) / per))} · {len(names)} carpetas"
+                return self._card(w, 'EXPLORAR · carpetas', vis + [''] * max(0, (lay['rows_avail'] - 1) - len(vis)),
+                                  rt, C_PINK, selected=sel, color=C_TEXT) + [
+                    self._card_line(w, C_LABEL + '↑↓ mover · → canciones · Enter reproducir · Esc volver' + C_RESET)]
+            else:
+                name = self.browse_folder or ''
+                items = []
+                for i, t in enumerate(self.browse_tracks):
+                    title = t.get('title') or t.get('filename') or ''
+                    mark = C_GREEN + '▸ ' + C_RESET if i == self.browse_sel else '  '
+                    items.append(mark + C_VIOLET + title + C_RESET)
+                per = max(1, lay['rows_avail'] - 2)
+                page = (self.browse_sel // per) if items else 0
+                self.browse_page = page
+                vis = items[page * per:(page + 1) * per]
+                sel = self.browse_sel - page * per
+                sel = sel if 0 <= sel < len(vis) else None
+                rt = f"{len(items)} pistas"
+                return self._card(w, f'EXPLORAR · {name}', vis + [''] * max(0, (lay['rows_avail'] - 1) - len(vis)),
+                                  rt, C_CYAN, selected=sel, color=C_TEXT) + [
+                    self._card_line(w, C_LABEL + '← carpeta · Enter reproducir · Esc salir' + C_RESET)]
+
+        if self.mode == 'queue':
+            items = []
+            n = len(self.current_queue)
+            for k in range(1, 30):
+                idx = self.queue_index + k
+                if idx >= n:
+                    break
+                t = self.current_queue[idx]
+                items.append(C_VIOLET + f'{k:>2}' + C_RESET + '  ' +
+                             (t.get('title') or t.get('filename') or ''))
+            hint = 'Espacio pausa · Esc/← vuelve' if items else '(col vacia)'
+            if not items:
+                items = [C_LABEL + '(sin mas pistas en cola)' + C_RESET]
+            return self._card(w, 'COLA', items, f"siguen {len(items)}", C_CYAN,
+                              color=C_TEXT) + [self._card_line(w, C_LABEL + hint + C_RESET)]
+
+        if self.mode == 'history':
+            items = []
+            for i, t in enumerate(reversed(self.history[-14:])):
+                title = t.get('title') or t.get('filename') or ''
+                items.append(C_VIOLET + f'{i + 1:>2}' + C_RESET + '  ' + C_GRAY + title + C_RESET)
+            if not items:
+                items = [C_LABEL + '(historial vacio)' + C_RESET]
+            return self._card(w, 'HISTORIAL', items, f"{len(self.history)} pistas",
+                              C_YELLOW, color=C_TEXT) + [
+                self._card_line(w, C_LABEL + 'Esc vuelve al inicio' + C_RESET)]
+
+        return self._card(w, 'VIOLETA', [C_LABEL + '...' + C_RESET])
 
     # -------------------------------------------------------------- state --
 
@@ -660,9 +1066,45 @@ class DJLiviApp:
 
     # ---------------------------------------------------------------- run --
 
+    def _read_escape_seq(self):
+        """Lee una secuencia de escape completa (p.ej. [A, [5~) y la devuelve."""
+        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+        if not r:
+            return ''
+        first = sys.stdin.read(1)
+        if first not in ('[', 'O'):
+            return first
+        seq = first
+        while len(seq) < 8:
+            r, _, _ = select.select([sys.stdin], [], [], 0.05)
+            if not r:
+                break
+            c = sys.stdin.read(1)
+            seq += c
+            if '@' <= c <= '~':
+                break
+        return seq
+
+    def _page_folders(self, delta):
+        if not self.folder_names:
+            return
+        if not hasattr(self, '_folders_body_rows'):
+            rows = shutil.get_terminal_size((100, 30)).lines
+            per_line = 3 if self._layout()['total'] >= 80 else 1
+            body_rows = max(4, rows - 15) - 2
+        else:
+            per_line = 3 if self._layout()['total'] >= 80 else 1
+            body_rows = self._folders_body_rows
+        per_page = max(1, body_rows) * per_line
+        pages = max(1, math.ceil(len(self.folder_names) / per_page))
+        self.folder_page = max(0, min(self.folder_page + delta, pages - 1))
+
     def run(self):
         self.setup()
         old_settings = termios.tcgetattr(sys.stdin)
+        sys.stdout.write('\033[?1049h')   # buffer alternativo (no ensucia scrollback)
+        sys.stdout.write('\033[?25l')     # oculta cursor
+        sys.stdout.flush()
         try:
             tty.setcbreak(sys.stdin.fileno())
             crossfade_triggered = False
@@ -696,13 +1138,17 @@ class DJLiviApp:
                     elif ch in ('\r', '\n'):
                         self.commit_search()
                     elif ch == '\x1b':
-                        r_esc, _, _ = select.select([sys.stdin], [], [], 0.05)
-                        if r_esc:
-                            sys.stdin.read(2)
+                        self._read_escape_seq()
                         self.cancel_transient()
                     elif ch.isprintable():
                         self.search_query += ch
                         self.update_search()
+                    continue
+
+                # --- Ayuda (? para alternar) ---
+                if ch == '?':
+                    self.show_help = not self.show_help
+                    self.mode = 'main'
                     continue
 
                 # --- Teclas de modo ---
@@ -720,12 +1166,13 @@ class DJLiviApp:
                     self.search_query = ''
                     self.update_search()
                     self.mode = 'main'
+                elif ch in ('[', ']'):
+                    self._page_folders(-1 if ch == '[' else 1)
                 elif ch == '\x1b':
-                    r_esc, _, _ = select.select([sys.stdin], [], [], 0.05)
-                    if not r_esc:
+                    seq = self._read_escape_seq()
+                    if not seq:
                         self.cancel_transient()
                         continue
-                    seq = sys.stdin.read(2)
                     if self.mode == 'browse':
                         if seq == '[A':
                             self.browse_move(-1)
@@ -735,8 +1182,13 @@ class DJLiviApp:
                             self.browse_expand()
                         elif seq == '[D':
                             self.browse_collapse()
+                        elif seq in ('[5~',):
+                            self.browse_move(-8)
+                        elif seq in ('[6~',):
+                            self.browse_move(8)
                     elif self.mode in ('queue', 'history'):
-                        self.mode = 'main'
+                        if seq in ('[D', 'q', '\x1b'):
+                            self.mode = 'main'
                     else:
                         if seq == '[C':
                             self.seek_seconds(10)
@@ -746,12 +1198,20 @@ class DJLiviApp:
                             self.advance_track()
                         elif seq == '[B':
                             self.previous_track()
+                        elif seq == '[5~':
+                            self._page_folders(-1)
+                        elif seq == '[6~':
+                            self._page_folders(1)
                 elif self.mode == 'browse':
                     if ch in ('\r', '\n'):
                         self.browse_play()
+                    elif ch in ('q', 'Q'):
+                        self.mode = 'main'
                 elif self.mode in ('queue', 'history'):
                     if ch == ' ':
                         self.mixer.toggle_pause()
+                    elif ch in ('q', 'Q'):
+                        self.mode = 'main'
                 else:
                     if ch == ' ':
                         self.mixer.toggle_pause()
@@ -789,13 +1249,15 @@ class DJLiviApp:
                         idx = int(ch) - 1
                         self.play_folder_by_index(idx)
                     elif ch in ('q', 'Q'):
-                        print("\nCerrando reproductor...")
                         self.running = False
                         break
         finally:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            sys.stdout.write('\033[?25h\033[?1049l')
+            sys.stdout.flush()
             self.mixer.stop()
             self.save_state()
+            print("\nVioleta cerrada. Hasta luego.")
 
 
 if __name__ == "__main__":
