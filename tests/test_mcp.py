@@ -22,7 +22,7 @@ def test_protocolo_initialize():
     resp = dj_mcp.handle({"jsonrpc": "2.0", "id": 1,
                           "method": "initialize",
                           "params": {"protocolVersion": "2024-11-05"}})
-    assert resp["result"]["serverInfo"]["name"] == "omniplayer-dj"
+    assert resp["result"]["serverInfo"]["name"] == "violeta-dj"
     assert resp["result"]["capabilities"]["tools"] == {}
 
 

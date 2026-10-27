@@ -1668,6 +1668,7 @@ class DJLiviController:
             return sorted(self.favorites)
 
     def advance_track(self, quick=False):
+        rearm = False
         with self.lock:
             if not self.current_queue:
                 return
@@ -1676,10 +1677,30 @@ class DJLiviController:
 
             self.queue_index += 1
             if self.queue_index >= len(self.current_queue):
-                if self.shuffle_mode:
-                    random.shuffle(self.current_queue)
-                self.queue_index = 0
-            next_track = self.current_queue[self.queue_index]
+                # Auto-DJ: si está activo y hay mood, rearma la cola.
+                # Marcamos la bandera y salimos del lock para no
+                # re-entrar (build_auto_queue adquiere el lock solo).
+                if self.auto_dj and self.mood:
+                    rearm = True
+                else:
+                    if self.shuffle_mode:
+                        random.shuffle(self.current_queue)
+                    self.queue_index = 0
+            if not rearm:
+                next_track = self.current_queue[self.queue_index]
+
+        if rearm:
+            try:
+                self.build_auto_queue(minutes=45, mood=self.mood, speech=False)
+            except Exception as exc:
+                print("[auto_dj] no se pudo rearmar: %s" % exc)
+                with self.lock:
+                    self.current_queue = list(self.all_tracks)
+                    self.queue_index = 0
+                if self.current_queue:
+                    self.mixer.play_track(self.current_queue[0],
+                                          crossfade_sec=min(self.crossfade_sec, 3.0))
+            return
 
         crossfade = min(self.crossfade_sec, 3.0) if quick else self.crossfade_sec
         self.mixer.play_track(next_track, crossfade_sec=crossfade)

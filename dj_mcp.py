@@ -216,7 +216,7 @@ def handle(message):
                 "protocolVersion": message.get("params", {}).get(
                     "protocolVersion", "2024-11-05"),
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "omniplayer-dj",
+                "serverInfo": {"name": "violeta-dj",
                                "version": "1.0.0"},
             },
         }

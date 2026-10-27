@@ -107,7 +107,7 @@ class DJLiviApp:
     # ------------------------------------------------------------------ UI --
 
     def _top(self):
-        return C_CYAN + '┌' + self.H * 26 + C_RESET + C_BOLD + ' OMNIPLAYER ' + C_RESET + C_CYAN + self.H * 27 + '┐' + C_RESET
+        return C_CYAN + '┌' + self.H * 26 + C_RESET + C_BOLD + ' VIOLETA ' + C_RESET + C_CYAN + self.H * 27 + '┐' + C_RESET
 
     def _sep(self):
         return C_CYAN + '├' + self.H * self.W + '┤' + C_RESET

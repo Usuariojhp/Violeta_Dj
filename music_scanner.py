@@ -88,6 +88,20 @@ def get_search_roots():
         if os.path.exists(expanded) and expanded not in roots:
             roots.append(expanded)
 
+    # USB / discos extraíbles montados en Linux
+    for base in ('/media', '/mnt', '/run/media'):
+        if os.path.isdir(base):
+            try:
+                for user_dir in os.listdir(base):
+                    user_path = os.path.join(base, user_dir)
+                    if os.path.isdir(user_path):
+                        for mount in os.listdir(user_path):
+                            mount_path = os.path.join(user_path, mount)
+                            if os.path.ismount(mount_path) and mount_path not in roots:
+                                roots.append(mount_path)
+            except Exception:
+                pass
+
     if not roots:
         roots.append(os.path.expanduser('~'))
     return roots
