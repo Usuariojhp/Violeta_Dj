@@ -211,7 +211,7 @@ class DJLiviApp:
         # Modos de navegacion: main | browse | queue | history + buscador
         self.mode = 'main'
         self.folder_names = []
-        self.browse_level = 'folders'   # 'folders' | 'tracks'
+        self.browse_level = 'folders'
         self.browse_sel = 0
         self.browse_folder = None
         self.browse_tracks = []
@@ -219,73 +219,42 @@ class DJLiviApp:
         self.search_query = ''
         self.search_results = []
 
-        # Estado de la interfaz (dashboard)
+        # Estado UI simple
         self.show_help = False
         self.folder_page = 0
         self.browse_page = 0
         self._eq_tick = 0
+        self.folder_input = ''
 
     # ------------------------------------------------------------------ UI --
 
-    SEL_BG = _bg((76, 29, 149), '\033[45m')
     BAR_EMPTY = '░'
 
-    # -- geometria de tarjetas ---------------------------------------------
+    # -- helpers simples ----------------------------------------------------
 
-    def _card_top(self, width, left_label, right_label=None, right_color=None):
-        """Borde superior con pestanera de titulo (y opcional etiqueta a la derecha)."""
+    def _box_top(self, width, title, right=''):
+        """Linea superior de caja: ╭─ title ──── right ─╮"""
         inner = max(4, width - 2)
-        left_seg = '─ ' + C_BOLD + C_VIOLET + left_label + C_RESET + C_BORDER + ' '
-        left_vis = _vis_len(left_seg)
-        if right_label:
-            rc = right_color or C_GREEN
-            # parte visible: " <label> ─"
-            right_vis = 1 + _vis_len(right_label) + 2
-            d = inner - left_vis - right_vis
-            if d < 1:
-                right_vis = 1
-                d = inner - left_vis - 1
-            right_seg = C_BORDER + ' ' + rc + right_label + C_BORDER + ' ─'
-        else:
-            right_vis = 1
-            d = inner - left_vis - 1
-            right_seg = C_BORDER + '─'
-        d = max(0, d)
-        return C_BORDER + '╭' + left_seg + ('─' * d) + right_seg + C_RESET
+        t = ' ' + C_BOLD + C_VIOLET + title + C_RESET + C_BORDER + ' '
+        r = C_BORDER + ' ' + right + ' ' if right else C_BORDER + ' '
+        used = _vis_len(t) + _vis_len(r)
+        d = max(0, inner - used)
+        return C_BORDER + '╭' + t + ('─' * d) + r + '╮' + C_RESET
 
-    def _card_line(self, width, content='', color=C_RESET, right=None, right_color=None):
+    def _box_line(self, width, content='', color=C_RESET, right=''):
+        """Linea interior: │ content ... right │"""
         cw = max(4, width - 4)
-        if right is not None:
+        if right:
             gap = cw - _vis_len(content) - _vis_len(right)
             if gap < 1:
                 content = _fit_ansi(content, max(0, cw - _vis_len(right) - 1))
                 gap = cw - _vis_len(content) - _vis_len(right)
             content = content + (' ' * max(0, gap)) + right
         inner = _pad_ansi(_fit_ansi(content, cw), cw)
-        return (C_BORDER + '│' + C_RESET + ' ' + color + inner + C_RESET +
-                ' ' + C_BORDER + '│' + C_RESET)
+        return C_BORDER + '│' + C_RESET + ' ' + color + inner + C_RESET + ' ' + C_BORDER + '│' + C_RESET
 
-    def _card_sel(self, width, content, color=C_RESET):
-        """Linea de lista con barra de seleccion a todo el ancho interior."""
-        cw = max(4, width - 4)
-        inner = _pad_ansi(_fit_ansi(content, cw), cw)
-        return (C_BORDER + '│' + C_RESET + self.SEL_BG + ' ' + color + inner +
-                C_RESET + self.SEL_BG + ' ' + C_RESET + C_BORDER + '│' + C_RESET)
-
-    def _card_bottom(self, width):
+    def _box_bottom(self, width):
         return C_BORDER + '╰' + ('─' * max(4, width - 2)) + '╯' + C_RESET
-
-    def _card(self, width, title, lines, right_title=None, right_color=None,
-              selected=None, color=C_GRAY):
-        """Tarjeta completa: borde superior + cuerpo + borde inferior."""
-        out = [self._card_top(width, title, right_title, right_color)]
-        for i, ln in enumerate(lines):
-            if selected is not None and i == selected:
-                out.append(self._card_sel(width, ln, color))
-            else:
-                out.append(self._card_line(width, ln, color))
-        out.append(self._card_bottom(width))
-        return out
 
     @staticmethod
     def _merge_cols(left, right, gap=2):
@@ -301,15 +270,14 @@ class DJLiviApp:
 
     def _layout(self):
         cols = max(40, shutil.get_terminal_size((100, 30)).columns)
-        if cols >= 94:
-            total = min(cols - 2, 104)
+        total = min(cols - 1, 110)
+        if cols >= 96:
             gap = 2
             left = int(round((total - gap) * 0.62))
-            left = max(46, min(left, total - gap - 34))
+            left = max(46, min(left, total - gap - 32))
             right = total - gap - left
             return {'total': total, 'left': left, 'right': right,
                     'two': right >= 30, 'cols': cols}
-        total = min(cols, 100)
         return {'total': total, 'left': total, 'right': 0, 'two': False, 'cols': cols}
 
     # -- piezas visuales ----------------------------------------------------
@@ -364,187 +332,169 @@ class DJLiviApp:
             return '● REPRODUCIENDO', C_GREEN
         return '● DETENIDO', C_GRAY
 
-    # -- pantallas ----------------------------------------------------------
+    # -- pantallas --------------------------------------------------------
 
-    def _brand_card(self, width, status):
+    def _brand_box(self, width, status):
         state, state_c = self._state_tag(status)
         mode = 'OFFLINE' if self.force_offline else 'ONLINE'
         mode_c = C_RED if self.force_offline else C_GREEN
-        stats = (f"{C_BOLD}{len(self.all_tracks)}{C_RESET}{C_LABEL} pistas{C_RESET}  "
-                 f"{C_LABEL}·{C_RESET}  {C_BOLD}{len(self.folder_map)}{C_RESET}{C_LABEL} carpetas{C_RESET}  "
-                 f"{C_LABEL}·{C_RESET}  {C_BOLD}★{len(self.favorites)}{C_RESET}")
-        right = self.status_msg or state
-        lines = [self._card_line(width, stats, right=f"{mode_c}{mode}{C_RESET}",
-                                 color=C_GRAY)]
-        return [self._card_top(width, 'VIOLETA · CROSSFADE STUDIO',
-                               state, state_c)] + lines + [self._card_bottom(width)]
+        stats = (f"{C_BOLD}{len(self.all_tracks)}{C_RESET}{C_LABEL} pistas  "
+                 f"{C_BOLD}{len(self.folder_map)}{C_RESET}{C_LABEL} carpetas  "
+                 f"{C_YELLOW}★{len(self.favorites)}{C_RESET}")
+        right = f"{mode_c}{mode}{C_RESET}  {state_c}{state}{C_RESET}"
+        return [self._box_top(width, 'VIOLETA', right),
+                self._box_line(width, stats, C_GRAY),
+                self._box_bottom(width)]
 
-    def _np_card(self, width):
+    def _np_box(self, width):
         status = self.mixer.get_status()
         track = status.get('track')
         pos = float(status.get('pos', 0.0))
         dur = float(status.get('dur', 0.0))
-        q_pos = f"{self.queue_index + 1}/{len(self.current_queue)}" if self.current_queue else '0/0'
         state, state_c = self._state_tag(status)
-
         body = []
         if track:
             title = track.get('title') or track.get('filename') or 'Sin pista'
             artist = track.get('artist') or track.get('folder') or ''
-            album = track.get('folder') or ''
             fav = track.get('path') in self.favorites
-            star = (C_YELLOW + '★ ' + C_RESET) if fav else ''
+            star = C_YELLOW + '★ ' + C_RESET if fav else ''
             body.append(star + C_BOLD + C_VIOLET + title + C_RESET)
-            body.append('   ' + C_CYAN + artist + C_RESET)
-            body.append('   ' + C_LABEL + album + C_RESET)
+            body.append(C_CYAN + artist + C_RESET)
             body.append('')
-
             pct = min(1.0, max(0.0, pos / dur)) if dur > 0 else 0.0
-            bar_w = max(18, width - 24)
-            bar = self._progress_bar(pct, bar_w)
-            times = f"{C_CYAN}{self.format_time(pos)}{C_RESET}{C_LABEL} / {C_RESET}{self.format_time(dur)}{C_RESET}"
-            body.append('  ' + bar + '  ' + C_BOLD + f"{pct * 100:3.0f}%" + C_RESET)
-
-            chips = f"  {self._eq(status.get('playing') and not status.get('paused'))}  {times}"
-            meta = []
+            bar_w = max(10, width - 22)
+            body.append('  ' + self._progress_bar(pct, bar_w) + f"  {C_BOLD}{pct * 100:3.0f}%{C_RESET}")
+            tail = ''
             if self.mood:
-                meta.append(self._chip(f"mood:{self.mood}", C_PINK, (60, 20, 55)))
-            if self.auto_dj:
-                meta.append(self._chip('auto-dj', C_VIOLET, (46, 28, 92)))
-            meta_s = (''.join(meta)).rstrip()
-            body.append(chips)
-            if meta_s:
-                body.append('  ' + meta_s)
+                tail = '  ' + C_PINK + 'mood:' + str(self.mood) + C_RESET
+            body.append(f"  {C_CYAN}{self.format_time(pos)}{C_RESET}{C_LABEL} / {self.format_time(dur)}{C_RESET}" + tail)
         else:
-            body.append(C_LABEL + 'Sin pista activa. Pulsa T para reproducir todo.' + C_RESET)
-            body += [''] * 6
+            body.append(C_LABEL + 'Sin pista. Pulsa T para reproducir todo.' + C_RESET)
+            body += [''] * 4
+        while len(body) < 5:
+            body.append('')
+        return ([self._box_top(width, 'REPRODUCIENDO', f"{state_c}{state}{C_RESET}")]
+                + [self._box_line(width, ln, C_TEXT) for ln in body[:5]]
+                + [self._box_bottom(width)])
 
-        lines = body[:7]
-        while len(lines) < 7:
-            lines.append('')
-        return self._card(width, 'REPRODUCIENDO', lines, state, state_c)
-
-    def _queue_card(self, width):
+    def _queue_box(self, width):
         n = len(self.current_queue)
         rows = []
-        for k in range(1, 6):
+        for k in range(1, 4):
             idx = self.queue_index + k
             if idx >= n:
                 break
             t = self.current_queue[idx]
             title = t.get('title') or t.get('filename') or ''
-            num = f"{C_VIOLET}{k:>2}{C_RESET}  "
-            rows.append(num + C_GRAY + title + C_RESET)
-        while len(rows) < 5:
+            rows.append(f"{C_VIOLET}{k}{C_RESET} {C_GRAY}{title}{C_RESET}")
+        while len(rows) < 4:
             rows.append('')
-        rows.append('')
-        rows.append(C_LABEL + 'C para ver toda la cola' + C_RESET)
-        right_t = f"{self.queue_index + 1}/{n}" if n else '0/0'
-        return self._card(width, 'A CONTINUACIÓN', rows,
-                          right_t, C_CYAN, color=C_TEXT)
+        rows.append(C_LABEL + 'C cola completa' + C_RESET)
+        right = f"{self.queue_index + 1}/{n}" if n else '0/0'
+        return ([self._box_top(width, 'A CONTINUACIÓN', C_CYAN + right + C_RESET)]
+                + [self._box_line(width, ln, C_TEXT) for ln in rows[:5]]
+                + [self._box_bottom(width)])
 
-    def _folders_card(self, width, body_rows):
+    def _folders_box(self, width, body_rows):
         if not self.folder_names:
             return []
-        self._folders_body_rows = max(1, body_rows)
         per_line = 3 if width >= 80 else 1
-        lines_per_page = self._folders_body_rows
-        per_page = lines_per_page * per_line
+        body_rows = max(1, body_rows)
+        self._folders_body_rows = body_rows
+        per_page = body_rows * per_line
         pages = max(1, math.ceil(len(self.folder_names) / per_page))
         page = max(0, min(self.folder_page, pages - 1))
         self.folder_page = page
         start = page * per_page
         chunk = self.folder_names[start:start + per_page]
-
         cw = max(10, (width - 4 - (per_line - 1) * 2) // per_line)
-
         rows = []
         for i in range(0, len(chunk), per_line):
             cells = []
             for j, name in enumerate(chunk[i:i + per_line]):
                 idx = start + i + j
                 count = len(self.folder_map.get(name, []))
-                num = f"{C_BOLD}{idx + 1:>3}{C_RESET}"
-                cell = f"{num}{C_LABEL}.{C_RESET}{C_CYAN}{name}{C_RESET} {C_LABEL}({count}){C_RESET}"
+                cell = (f"{C_VIOLET}{idx + 1}{C_RESET}{C_LABEL}.{C_RESET} "
+                        f"{C_CYAN}{name}{C_RESET} {C_LABEL}({count}){C_RESET}")
                 cells.append(_fit_ansi(cell, cw))
             rows.append('  '.join(cells))
-        while len(rows) < lines_per_page:
+        while len(rows) < body_rows:
             rows.append('')
-
-        rt = f"pág {page + 1}/{pages}" if pages > 1 else f"{len(self.folder_names)}"
-        return self._card(width, 'CARPETAS · 1-8 reproduce directo', rows, rt, C_PINK)
-
-    def _list_screen(self, lay, title, items, hint, right_title=None,
-                     right_color=None, numbered=False, offset=0, sel=None):
-        """Pantalla de lista completa (cola / historial / explorador / busqueda)."""
-        w = lay['total']
-        rows_avail = max(3, lay.get('rows_avail', 12))
-        body = []
-        self._list_sel = sel
-        for i, txt in enumerate(items):
-            if numbered:
-                body.append(f"{C_VIOLET}{i + 1 + offset:>2}{C_RESET}  {C_GRAY}{txt}{C_RESET}")
-            else:
-                body.append(txt)
-        total_rows = max(1, rows_avail - 1)
-        shown = body[:total_rows]
-        while len(shown) < total_rows:
-            shown.append('')
-        if hint:
-            shown[-1] = C_LABEL + hint + C_RESET
-        selected = 0 if sel is not None else None
-        if sel is not None and sel < len(body) and sel < total_rows:
-            selected = sel
-        return self._card(w, title, shown, right_title, right_color,
-                          selected=selected, color=C_TEXT)
+        if self.folder_input:
+            right = C_YELLOW + '#' + self.folder_input + C_RESET + C_LABEL + ' Enter' + C_RESET
+        else:
+            right = C_PINK + f"{page + 1}/{pages}" + C_RESET
+        out = [self._box_top(width, 'CARPETAS', right)]
+        out += [self._box_line(width, ln, C_TEXT) for ln in rows]
+        out.append(self._box_line(width, C_LABEL + 'número + Enter · [ ] página · E explorar · ? ayuda' + C_RESET, C_LABEL))
+        out.append(self._box_bottom(width))
+        return out
 
     def _status_bar(self, width):
         bits = []
         bits.append((C_GREEN if not self.force_offline else C_RED) +
                     ('● online' if not self.force_offline else '● offline') + C_RESET)
-        bits.append(C_LABEL + 'shuffle' + C_RESET + ' ' +
-                    (C_GREEN + 'ON' + C_RESET if self.shuffle_mode else C_GRAY + 'OFF' + C_RESET))
-        bits.append(C_LABEL + 'voz' + C_RESET + ' ' +
-                    (C_GREEN + 'ON' + C_RESET if self.voice_enabled else C_GRAY + 'OFF' + C_RESET))
+        bits.append(C_LABEL + 'shuffle ' + (C_GREEN + 'ON' + C_RESET if self.shuffle_mode
+                                            else C_GRAY + 'OFF' + C_RESET))
+        bits.append(C_LABEL + 'voz ' + (C_GREEN + 'ON' + C_RESET if self.voice_enabled
+                                        else C_GRAY + 'OFF' + C_RESET))
         xf = f"{self.crossfade_sec:.1f}s" if self.crossfade_sec > 0 else 'off'
-        bits.append(C_LABEL + 'xfade' + C_RESET + ' ' + C_CYAN + xf + C_RESET)
+        bits.append(C_LABEL + 'xfade ' + C_CYAN + xf + C_RESET)
         if self.mood:
-            bits.append(C_LABEL + 'mood' + C_RESET + ' ' + C_PINK + str(self.mood) + C_RESET)
+            bits.append(C_PINK + 'mood:' + str(self.mood) + C_RESET)
+        if self.folder_input:
+            bits.append(C_YELLOW + 'carpeta #' + self.folder_input + C_RESET)
         bits.append(C_BOLD + '? ayuda' + C_RESET)
         line = '  ' + C_LABEL + ' · '.join(bits) + C_RESET
         return _fit_ansi(line, width, ellipsis=False)
 
     def _help_screen(self, lay):
         w = lay['total']
-        half = w // 2
+        inner = max(10, w - 4)
+        half = (inner - 2) // 2
         left = [
-            f"{C_BOLD}ESPACIO{C_RESET}  pausa / reanudar",
-            f"{C_BOLD}N{C_RESET}       siguiente pista",
-            f"{C_BOLD}B{C_RESET}       anterior pista",
-            f"{C_BOLD}S{C_RESET}       shuffle on/off",
-            f"{C_BOLD}F{C_RESET}       favorito",
-            f"{C_BOLD}X{C_RESET}       ciclar crossfade",
-            f"{C_BOLD}V{C_RESET}       voz on/off",
+            f"{C_BOLD}ESPACIO{C_RESET} pausa / reanudar",
+            f"{C_BOLD}N{C_RESET} / {C_BOLD}B{C_RESET} siguiente / anterior",
+            f"{C_BOLD}←{C_RESET} / {C_BOLD}→{C_RESET} ±10 segundos",
+            f"{C_BOLD}S{C_RESET} shuffle",
+            f"{C_BOLD}F{C_RESET} favorito",
+            f"{C_BOLD}X{C_RESET} crossfade",
         ]
         right = [
-            f"{C_BOLD}A{C_RESET}       auto-dj (45 min)",
-            f"{C_BOLD}M{C_RESET}       cambiar mood",
-            f"{C_BOLD}Z{C_RESET}       comando de voz",
-            f"{C_BOLD}E{C_RESET}       explorar carpetas",
-            f"{C_BOLD}C{C_RESET} / {C_BOLD}H{C_RESET}   cola / historial",
-            f"{C_BOLD}/{C_RESET}       buscar",
-            f"{C_BOLD}T{C_RESET}       todo el dispositivo",
+            f"{C_BOLD}E{C_RESET} explorar carpetas",
+            f"{C_BOLD}C{C_RESET} / {C_BOLD}H{C_RESET} cola / historial",
+            f"{C_BOLD}/{C_RESET} buscar",
+            f"{C_BOLD}T{C_RESET} todo el dispositivo",
+            f"{C_BOLD}A{C_RESET} auto-dj",
+            f"{C_BOLD}M{C_RESET} mood",
         ]
-        extra = [f"{C_BOLD}←{C_RESET}/{C_BOLD}→{C_RESET} ±10s    {C_BOLD}[{C_RESET}/{C_BOLD}]{C_RESET} pagina de carpetas    {C_BOLD}Q{C_RESET} salir"]
         merged = self._merge_cols(
-            [self._card_line(half, ln, C_TEXT) for ln in left],
-            [self._card_line(w - half - 2, ln, C_TEXT) for ln in right], 2)
-        body = merged + [self._card_line(w, extra[0], C_LABEL)]
-        return self._card(w, 'AYUDA · pulsa ? para cerrar', body, 'violeta', C_PINK,
-                          color=C_TEXT)
+            [_pad_ansi(_fit_ansi(ln, half), half) for ln in left],
+            [_pad_ansi(_fit_ansi(ln, half), half) for ln in right], 2)
+        out = [self._box_top(w, 'AYUDA', C_PINK + '? cerrar' + C_RESET)]
+        out += [self._box_line(w, ln, C_TEXT) for ln in merged]
+        out.append(self._box_line(w, C_LABEL + 'V voz · Z comando de voz · Q salir' + C_RESET, C_LABEL))
+        out.append(self._box_bottom(w))
+        return out
 
-    def _emit(self, lines):
-        sys.stdout.write('\033[H\033[J' + '\n'.join(lines) + '\n')
+    def _list_box(self, width, title, items, right='', hint='', rows_avail=12):
+        rows_avail = max(3, rows_avail)
+        body = list(items)[:rows_avail - 1]
+        while len(body) < rows_avail - 1:
+            body.append('')
+        out = [self._box_top(width, title, right)]
+        out += [self._box_line(width, ln, C_TEXT) for ln in body]
+        out.append(self._box_line(width, hint or '', C_LABEL))
+        out.append(self._box_bottom(width))
+        return out
+
+    def _emit(self, lines, footer=''):
+        rows = shutil.get_terminal_size((100, 30)).lines
+        limit = max(1, rows - (1 if footer else 0))
+        out = list(lines)[:limit]
+        if footer:
+            out.append(footer)
+        sys.stdout.write('\033[H\033[J' + '\n'.join(out))
         sys.stdout.flush()
 
     def render_ui(self):
@@ -553,90 +503,74 @@ class DJLiviApp:
         status = self.mixer.get_status()
 
         if self.show_help:
-            self._emit(self._help_screen(lay) + [self._status_bar(lay['total'])])
+            self._emit(self._help_screen(lay), self._status_bar(lay['total']))
             return
 
         if self.search_active:
             items = []
-            for i, t in enumerate(self.search_results[:8]):
+            for i, t in enumerate(self.search_results[:10]):
                 title = t.get('title') or t.get('filename') or ''
                 artist = t.get('artist') or t.get('folder') or ''
                 mark = C_GREEN + '▸ ' + C_RESET if i == 0 else '  '
                 items.append(mark + C_VIOLET + title + C_RESET + '  ' + C_LABEL + '· ' + artist + C_RESET)
-            head = C_BOLD + 'Buscar: ' + C_RESET + C_CYAN + self.search_query + C_RESET + C_LABEL + '_' + C_RESET
-            lay['rows_avail'] = max(3, rows - 7)
-            scr = [self._card_top(lay['total'], 'BUSCAR', f"{len(self.search_results)} resultados", C_CYAN)]
-            scr.append(self._card_line(lay['total'], head))
-            body_h = max(2, rows - 6)
-            for i, txt in enumerate(items[:body_h]):
-                scr.append(self._card_line(lay['total'], txt, C_TEXT, ))
-            for _ in range(max(0, body_h - len(items))):
-                scr.append(self._card_line(lay['total'], ''))
-            scr.append(self._card_line(lay['total'],
-                                       C_LABEL + 'Enter reproduce el primero · Esc cancela' + C_RESET))
-            scr.append(self._card_bottom(lay['total']))
-            self._emit(scr + [self._status_bar(lay['total'])])
+            head = C_BOLD + 'Buscar: ' + C_RESET + C_CYAN + self.search_query + C_LABEL + '_' + C_RESET
+            box = self._list_box(lay['total'], 'BUSCAR', [head] + items,
+                                 C_CYAN + f"{len(self.search_results)}" + C_RESET,
+                                 'Enter reproduce el primero · Esc cancela',
+                                 rows_avail=max(4, rows - 5))
+            self._emit(box, self._status_bar(lay['total']))
             return
 
         if self.mode != 'main':
-            self._emit(self._alt_screen(lay, rows) + [self._status_bar(lay['total'])])
+            self._emit(self._alt_screen(lay, rows), self._status_bar(lay['total']))
             return
 
-        # --- pantalla principal -------------------------------------------
-        brand = self._brand_card(lay['total'], status)
-        np_card = self._np_card(lay['left'])
-        q_card = self._queue_card(lay['right']) if lay['two'] else []
-        head_h = len(brand) + 1 + max(len(np_card), len(q_card)) + 1 + 1
-        avail = max(4, rows - head_h)
-        folders = self._folders_card(lay['total'], avail - 2) if self.folder_names else []
-
+        out = self._brand_box(lay['total'], status) + ['']
+        np_box = self._np_box(lay['left'])
+        q_box = self._queue_box(lay['right']) if lay['two'] else []
         if lay['two']:
-            body = self._merge_cols(np_card, q_card, 2)
+            out += self._merge_cols(np_box, q_box, 2)
         else:
-            body = np_card + q_card
-        out = brand + [''] + body + ['']
-        out += folders
-        self._emit(out + [self._status_bar(lay['total'])])
+            out += np_box + q_box
+        free = rows - len(out) - 3
+        if self.folder_names and free >= 4:
+            out += [''] + self._folders_box(lay['total'], free - 2)
+        self._emit(out, self._status_bar(lay['total']))
 
     def _alt_screen(self, lay, rows):
         w = lay['total']
-        lay['rows_avail'] = max(4, rows - 6)
+        avail = max(3, rows - 4)
         if self.mode == 'browse':
             if self.browse_level == 'folders':
                 names = self.folder_names
+                per = max(1, avail - 3)
+                page = (self.browse_sel // per) if names else 0
+                self.browse_page = page
+                vis = names[page * per:(page + 1) * per]
                 items = []
-                for i, f in enumerate(names):
+                for rel, f in enumerate(vis):
+                    idx = page * per + rel
+                    mark = C_GREEN + '▸ ' + C_RESET if idx == self.browse_sel else '  '
                     count = len(self.folder_map.get(f, []))
-                    mark = C_GREEN + '▸ ' + C_RESET if i == self.browse_sel else '  '
-                    items.append(mark + C_VIOLET + f + C_RESET + C_LABEL + f'  ({count})' + C_RESET)
-                # paginacion que sigue la seleccion (auto-scroll)
-                per = max(1, lay['rows_avail'] - 2)
-                page = (self.browse_sel // per) if items else 0
-                self.browse_page = page
-                vis = items[page * per:(page + 1) * per]
-                sel = self.browse_sel - page * per
-                sel = sel if 0 <= sel < len(vis) else None
-                rt = f"pág {page + 1}/{max(1, math.ceil(len(items) / per))} · {len(names)} carpetas"
-                return self._card(w, 'EXPLORAR · carpetas', vis + [''] * max(0, (lay['rows_avail'] - 1) - len(vis)),
-                                  rt, C_PINK, selected=sel, color=C_TEXT) + [
-                    self._card_line(w, C_LABEL + '↑↓ mover · → canciones · Enter reproducir · Esc volver' + C_RESET)]
-            else:
-                name = self.browse_folder or ''
-                items = []
-                for i, t in enumerate(self.browse_tracks):
-                    title = t.get('title') or t.get('filename') or ''
-                    mark = C_GREEN + '▸ ' + C_RESET if i == self.browse_sel else '  '
-                    items.append(mark + C_VIOLET + title + C_RESET)
-                per = max(1, lay['rows_avail'] - 2)
-                page = (self.browse_sel // per) if items else 0
-                self.browse_page = page
-                vis = items[page * per:(page + 1) * per]
-                sel = self.browse_sel - page * per
-                sel = sel if 0 <= sel < len(vis) else None
-                rt = f"{len(items)} pistas"
-                return self._card(w, f'EXPLORAR · {name}', vis + [''] * max(0, (lay['rows_avail'] - 1) - len(vis)),
-                                  rt, C_CYAN, selected=sel, color=C_TEXT) + [
-                    self._card_line(w, C_LABEL + '← carpeta · Enter reproducir · Esc salir' + C_RESET)]
+                    items.append(mark + C_VIOLET + f + C_RESET + C_LABEL + f' ({count})' + C_RESET)
+                pages = max(1, math.ceil(len(names) / per)) if names else 1
+                return self._list_box(w, 'EXPLORAR · carpetas', items,
+                                      C_PINK + f"{page + 1}/{pages}" + C_RESET,
+                                      '↑↓ mover · → abrir · Enter reproducir · Esc volver', avail)
+            name = self.browse_folder or ''
+            per = max(1, avail - 3)
+            page = (self.browse_sel // per) if self.browse_tracks else 0
+            self.browse_page = page
+            vis = self.browse_tracks[page * per:(page + 1) * per]
+            items = []
+            for rel, t in enumerate(vis):
+                idx = page * per + rel
+                title = t.get('title') or t.get('filename') or ''
+                mark = C_GREEN + '▸ ' + C_RESET if idx == self.browse_sel else '  '
+                items.append(mark + C_VIOLET + title + C_RESET)
+            return self._list_box(w, 'EXPLORAR · ' + name, items,
+                                  C_CYAN + f"{len(self.browse_tracks)}" + C_RESET,
+                                  '← carpeta · Enter reproducir · Esc salir', avail)
 
         if self.mode == 'queue':
             items = []
@@ -648,24 +582,22 @@ class DJLiviApp:
                 t = self.current_queue[idx]
                 items.append(C_VIOLET + f'{k:>2}' + C_RESET + '  ' +
                              (t.get('title') or t.get('filename') or ''))
-            hint = 'Espacio pausa · Esc/← vuelve' if items else '(col vacia)'
             if not items:
                 items = [C_LABEL + '(sin mas pistas en cola)' + C_RESET]
-            return self._card(w, 'COLA', items, f"siguen {len(items)}", C_CYAN,
-                              color=C_TEXT) + [self._card_line(w, C_LABEL + hint + C_RESET)]
+            return self._list_box(w, 'COLA', items, C_CYAN + f"{n}" + C_RESET,
+                                  'Espacio pausa · Esc vuelve', avail)
 
         if self.mode == 'history':
             items = []
-            for i, t in enumerate(reversed(self.history[-14:])):
+            for i, t in reversed(list(enumerate(self.history[-14:]))):
                 title = t.get('title') or t.get('filename') or ''
                 items.append(C_VIOLET + f'{i + 1:>2}' + C_RESET + '  ' + C_GRAY + title + C_RESET)
             if not items:
                 items = [C_LABEL + '(historial vacio)' + C_RESET]
-            return self._card(w, 'HISTORIAL', items, f"{len(self.history)} pistas",
-                              C_YELLOW, color=C_TEXT) + [
-                self._card_line(w, C_LABEL + 'Esc vuelve al inicio' + C_RESET)]
+            return self._list_box(w, 'HISTORIAL', items, C_YELLOW + f"{len(self.history)}" + C_RESET,
+                                  'Esc vuelve al inicio', avail)
 
-        return self._card(w, 'VIOLETA', [C_LABEL + '...' + C_RESET])
+        return self._list_box(w, 'VIOLETA', [C_LABEL + '...' + C_RESET], '', '', avail)
 
     # -------------------------------------------------------------- state --
 
@@ -1063,23 +995,40 @@ class DJLiviApp:
         self.search_active = False
         self.search_query = ''
         self.search_results = []
+        self.folder_input = ''
 
     # ---------------------------------------------------------------- run --
 
+    def _read_key(self):
+        """Lee UNA tecla sin read-ahead del buffer de Python (soporta UTF-8)."""
+        fd = sys.stdin.fileno()
+        data = os.read(fd, 1)
+        if not data:
+            return ''
+        lead = data[0]
+        extra = 3 if lead >= 0xF0 else 2 if lead >= 0xE0 else 1 if lead >= 0xC0 else 0
+        for _ in range(extra):
+            r, _, _ = select.select([fd], [], [], 0.02)
+            if not r:
+                break
+            data += os.read(fd, 1)
+        return data.decode('utf-8', 'ignore')
+
     def _read_escape_seq(self):
         """Lee una secuencia de escape completa (p.ej. [A, [5~) y la devuelve."""
-        r, _, _ = select.select([sys.stdin], [], [], 0.05)
+        fd = sys.stdin.fileno()
+        r, _, _ = select.select([fd], [], [], 0.05)
         if not r:
             return ''
-        first = sys.stdin.read(1)
+        first = os.read(fd, 1).decode('utf-8', 'ignore')
         if first not in ('[', 'O'):
             return first
         seq = first
         while len(seq) < 8:
-            r, _, _ = select.select([sys.stdin], [], [], 0.05)
+            r, _, _ = select.select([fd], [], [], 0.05)
             if not r:
                 break
-            c = sys.stdin.read(1)
+            c = os.read(fd, 1).decode('utf-8', 'ignore')
             seq += c
             if '@' <= c <= '~':
                 break
@@ -1125,10 +1074,10 @@ class DJLiviApp:
                 else:
                     crossfade_triggered = False
 
-                rlist, _, _ = select.select([sys.stdin], [], [], 0.5)
+                rlist, _, _ = select.select([sys.stdin.fileno()], [], [], 0.5)
                 if not rlist:
                     continue
-                ch = sys.stdin.read(1)
+                ch = self._read_key()
 
                 # --- Buscador activo ---
                 if self.search_active:
@@ -1245,9 +1194,13 @@ class DJLiviApp:
                         self.seek_seconds(10)
                     elif ch in (',', '<'):
                         self.seek_seconds(-10)
-                    elif ch in '12345678':
-                        idx = int(ch) - 1
-                        self.play_folder_by_index(idx)
+                    elif ch.isdigit():
+                        self.folder_input = (self.folder_input + ch)[-3:]
+                    elif ch in ('\r', '\n'):
+                        if self.folder_input:
+                            idx = int(self.folder_input) - 1
+                            self.folder_input = ''
+                            self.play_folder_by_index(idx)
                     elif ch in ('q', 'Q'):
                         self.running = False
                         break
